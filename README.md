@@ -2,7 +2,7 @@
 
 Execute Python `.py` files on remote Jupyter servers.
 
-[![PyPI version](https://badge.fury.io/py/pyrun-jupyter.svg)](https://pypi.org/project/pyrun-jupyter/)
+[![PyPI version](https://img.shields.io/pypi/v/pyrun-jupyter)](https://pypi.org/project/pyrun-jupyter/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub](https://img.shields.io/badge/GitHub-petitoff%2Fpyrun--jupyter-blue)](https://github.com/petitoff/pyrun-jupyter)
@@ -16,7 +16,7 @@ pip install pyrun-jupyter
 ## Quick Start
 
 ```python
-from py2jupyter import JupyterRunner
+from pyrun_jupyter import JupyterRunner
 
 # Connect to your Jupyter server
 runner = JupyterRunner("http://localhost:8888", token="your_token")
@@ -44,7 +44,7 @@ print(result.stdout)
 ### Basic Usage
 
 ```python
-from py2jupyter import JupyterRunner
+from pyrun_jupyter import JupyterRunner
 
 runner = JupyterRunner("http://jupyter-server:8888", token="xxx")
 
@@ -59,7 +59,7 @@ runner.stop_kernel()
 ### Using Context Manager (Recommended)
 
 ```python
-from py2jupyter import JupyterRunner
+from pyrun_jupyter import JupyterRunner
 
 with JupyterRunner("http://localhost:8888", token="xxx") as runner:
     result = runner.run_file("my_script.py")
@@ -70,7 +70,7 @@ with JupyterRunner("http://localhost:8888", token="xxx") as runner:
 ### Passing Parameters to Scripts
 
 ```python
-from py2jupyter import JupyterRunner
+from pyrun_jupyter import JupyterRunner
 
 with JupyterRunner("http://localhost:8888", token="xxx") as runner:
     # Parameters are injected as variables in your script
@@ -96,7 +96,7 @@ print(f"Training with lr={learning_rate}, epochs={epochs}")
 ### Handling Errors
 
 ```python
-from py2jupyter import JupyterRunner, ExecutionError
+from pyrun_jupyter import JupyterRunner, ExecutionError
 
 runner = JupyterRunner("http://localhost:8888", token="xxx")
 
