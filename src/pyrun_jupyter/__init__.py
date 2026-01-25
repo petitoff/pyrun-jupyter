@@ -7,10 +7,14 @@ Usage:
     runner = JupyterRunner("http://jupyter-server:8888", token="your_token")
     result = runner.run_file("script.py")
     print(result.stdout)
+    
+    runner.upload_file("local_data.csv", "data/input.csv")
+    runner.download_file("output/model.pt", "local/model.pt")
 """
 
 from .runner import JupyterRunner
 from .result import ExecutionResult
+from .contents import FileTransferError
 from .exceptions import (
     Py2JupyterError,
     ConnectionError,
@@ -18,7 +22,7 @@ from .exceptions import (
     ExecutionError,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "JupyterRunner",
     "ExecutionResult",
@@ -26,4 +30,5 @@ __all__ = [
     "ConnectionError",
     "KernelError",
     "ExecutionError",
+    "FileTransferError",
 ]

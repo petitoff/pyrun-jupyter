@@ -2,9 +2,10 @@
 
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, List
 
 from .kernel import KernelManager
+from .contents import ContentsManager, FileTransferError
 from .websocket import KernelWebSocket
 from .result import ExecutionResult
 from .exceptions import Py2JupyterError, KernelError, ExecutionError
@@ -47,6 +48,7 @@ class JupyterRunner:
         self.auto_start_kernel = auto_start_kernel
         
         self._kernel_manager = KernelManager(url, token)
+        self._contents_manager = ContentsManager(url, token)
         self._kernel_id: Optional[str] = None
         self._websocket: Optional[KernelWebSocket] = None
     
@@ -184,6 +186,87 @@ class JupyterRunner:
         for name, value in params.items():
             lines.append(f"{name} = {repr(value)}")
         return "\n".join(lines)
+    
+    # ==================== File Transfer Methods ====================
+    
+    def upload_file(
+        self,
+        local_path: Union[str, Path],
+        remote_path: str,
+        overwrite: bool = True
+    ) -> Dict[str, Any]:
+        """Upload a local file to the Jupyter server.
+        
+        Args:
+            local_path: Path to local file to upload
+            remote_path: Destination path on the server (e.g., "data/input.csv")
+            overwrite: Whether to overwrite if file exists (default: True)
+            
+        Returns:
+            Server response with file metadata
+            
+        Example:
+            >>> runner.upload_file("local_data.csv", "input/data.csv")
+            >>> runner.upload_file("model.py", "scripts/model.py")
+        """
+        return self._contents_manager.upload_file(str(local_path), remote_path, overwrite)
+    
+    def download_file(
+        self,
+        remote_path: str,
+        local_path: Union[str, Path]
+    ) -> Path:
+        """Download a file from the Jupyter server.
+        
+        Args:
+            remote_path: Path on the server (e.g., "output/model.pt")
+            local_path: Local destination path
+            
+        Returns:
+            Path to downloaded file
+            
+        Example:
+            >>> runner.download_file("output/trained_model.pt", "local/model.pt")
+            >>> runner.download_file("results.csv", "./results.csv")
+        """
+        return self._contents_manager.download_file(remote_path, str(local_path))
+    
+    def list_files(self, path: str = "") -> List[Dict[str, Any]]:
+        """List files and directories on the server.
+        
+        Args:
+            path: Directory path on server (empty for root)
+            
+        Returns:
+            List of file/directory info dictionaries with name, path, type, size
+            
+        Example:
+            >>> files = runner.list_files("output/")
+            >>> for f in files:
+            ...     print(f"{f['name']} ({f['type']})")
+        """
+        return self._contents_manager.list_contents(path)
+    
+    def delete_file(self, remote_path: str) -> None:
+        """Delete a file on the server.
+        
+        Args:
+            remote_path: Path to file on server
+        """
+        self._contents_manager.delete_file(remote_path)
+    
+    def file_exists(self, remote_path: str) -> bool:
+        """Check if a file exists on the server.
+        
+        Args:
+            remote_path: Path to check
+            
+        Returns:
+            True if file exists, False otherwise
+        """
+        return self._contents_manager.file_exists(remote_path)
+    
+    # ==================== Context Manager ====================
     
     def __enter__(self) -> "JupyterRunner":
         """Context manager entry."""

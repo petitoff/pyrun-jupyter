@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyrun-jupyter"
-version = "0.1.0"
+version = "0.2.0"
 description = "Execute Python .py files on remote Jupyter servers"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
 authors = [
-    {name = "pyrun-jupyter contributors"}
+    {name = "Blazej Domagala"}
 ]
 keywords = ["jupyter", "remote", "execution", "kernel", "python"]
 classifiers = [
