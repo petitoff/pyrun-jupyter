@@ -1,7 +1,7 @@
 """Tests for ExecutionResult dataclass."""
 
 import pytest
-from py2jupyter.result import ExecutionResult
+from pyrun_jupyter.result import ExecutionResult
 
 
 class TestExecutionResult:

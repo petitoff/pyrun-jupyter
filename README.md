@@ -1,16 +1,16 @@
-# py2jupyter
+# pyrun-jupyter
 
 Execute Python `.py` files on remote Jupyter servers.
 
-[![PyPI version](https://badge.fury.io/py/py2jupyter.svg)](https://pypi.org/project/py2jupyter/)
+[![PyPI version](https://badge.fury.io/py/pyrun-jupyter.svg)](https://pypi.org/project/pyrun-jupyter/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub](https://img.shields.io/badge/GitHub-petitoff%2Fpy2jupyter-blue)](https://github.com/petitoff/py2jupyter)
+[![GitHub](https://img.shields.io/badge/GitHub-petitoff%2Fpyrun--jupyter-blue)](https://github.com/petitoff/pyrun-jupyter)
 
 ## Installation
 
 ```bash
-pip install py2jupyter
+pip install pyrun-jupyter
 ```
 
 ## Quick Start

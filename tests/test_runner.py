@@ -5,8 +5,8 @@ from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 import tempfile
 
-from py2jupyter.runner import JupyterRunner
-from py2jupyter.result import ExecutionResult
+from pyrun_jupyter.runner import JupyterRunner
+from pyrun_jupyter.result import ExecutionResult
 
 
 class TestJupyterRunner:

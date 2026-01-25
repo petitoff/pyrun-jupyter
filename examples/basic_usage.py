@@ -1,6 +1,6 @@
-"""Example: Basic usage of py2jupyter."""
+"""Example: Basic usage of pyrun-jupyter."""
 
-from py2jupyter import JupyterRunner
+from pyrun_jupyter import JupyterRunner
 
 # Configuration - update these values for your Jupyter server
 JUPYTER_URL = "http://localhost:8888"
@@ -8,7 +8,7 @@ JUPYTER_TOKEN = "your_token_here"  # Get from Jupyter startup output
 
 
 def main():
-    """Demonstrate basic py2jupyter usage."""
+    """Demonstrate basic pyrun-jupyter usage."""
     
     # Create a runner and connect to server
     runner = JupyterRunner(JUPYTER_URL, token=JUPYTER_TOKEN)

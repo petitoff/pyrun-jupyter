@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/py2jupyter
+      url: https://pypi.org/p/pyrun-jupyter
     permissions:
       id-token: write  # Required for trusted publishing
 

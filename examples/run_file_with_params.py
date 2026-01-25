@@ -1,7 +1,7 @@
 """Example: Running .py files with parameters."""
 
 from pathlib import Path
-from py2jupyter import JupyterRunner
+from pyrun_jupyter import JupyterRunner
 
 JUPYTER_URL = "http://localhost:8888"
 JUPYTER_TOKEN = "your_token_here"

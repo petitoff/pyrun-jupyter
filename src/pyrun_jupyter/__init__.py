@@ -1,8 +1,8 @@
 """
-py2jupyter - Execute Python .py files on remote Jupyter servers.
+pyrun-jupyter - Execute Python .py files on remote Jupyter servers.
 
 Usage:
-    from py2jupyter import JupyterRunner
+    from pyrun_jupyter import JupyterRunner
 
     runner = JupyterRunner("http://jupyter-server:8888", token="your_token")
     result = runner.run_file("script.py")
