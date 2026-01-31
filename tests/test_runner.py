@@ -12,7 +12,8 @@ from pyrun_jupyter.result import ExecutionResult
 class TestJupyterRunner:
     """Test JupyterRunner class."""
     
-    def test_initialization(self):
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_initialization(self, mock_validate):
         """Test runner initialization."""
         runner = JupyterRunner(
             "http://localhost:8888",
@@ -25,12 +26,14 @@ class TestJupyterRunner:
         assert runner.kernel_name == "python3"
         assert not runner.is_connected
     
-    def test_url_trailing_slash_removed(self):
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_url_trailing_slash_removed(self, mock_validate):
         """Test that trailing slash is removed from URL."""
         runner = JupyterRunner("http://localhost:8888/", token="xxx")
         assert runner.url == "http://localhost:8888"
     
-    def test_generate_params_code(self):
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_generate_params_code(self, mock_validate):
         """Test parameter code generation."""
         runner = JupyterRunner("http://localhost:8888")
         
@@ -48,14 +51,16 @@ class TestJupyterRunner:
         assert "model_name = 'resnet50'" in code
         assert "use_cuda = True" in code
     
-    def test_run_file_not_found(self):
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_run_file_not_found(self, mock_validate):
         """Test FileNotFoundError for missing file."""
         runner = JupyterRunner("http://localhost:8888")
         
         with pytest.raises(FileNotFoundError):
             runner.run_file("nonexistent_file.py")
     
-    def test_run_file_wrong_extension(self):
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_run_file_wrong_extension(self, mock_validate):
         """Test ValueError for non-.py file."""
         runner = JupyterRunner("http://localhost:8888")
         
@@ -69,7 +74,8 @@ class TestJupyterRunner:
         finally:
             Path(temp_path).unlink()
     
-    def test_run_file_with_params(self):
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_run_file_with_params(self, mock_validate):
         """Test running file with parameters."""
         runner = JupyterRunner("http://localhost:8888", auto_start_kernel=False)
         runner._kernel_id = "test-kernel-id"  # Simulate connected state
@@ -95,7 +101,8 @@ class TestJupyterRunner:
         finally:
             Path(temp_path).unlink()
     
-    def test_repr(self):
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_repr(self, mock_validate):
         """Test string representation."""
         runner = JupyterRunner("http://localhost:8888")
         repr_str = repr(runner)
@@ -108,9 +115,10 @@ class TestJupyterRunner:
 class TestJupyterRunnerContextManager:
     """Test context manager functionality."""
     
+    @patch.object(JupyterRunner, '_validate_connection')
     @patch.object(JupyterRunner, 'start_kernel')
     @patch.object(JupyterRunner, 'stop_kernel')
-    def test_context_manager(self, mock_stop, mock_start):
+    def test_context_manager(self, mock_stop, mock_start, mock_validate):
         """Test context manager starts and stops kernel."""
         with JupyterRunner("http://localhost:8888") as runner:
             mock_start.assert_called_once()

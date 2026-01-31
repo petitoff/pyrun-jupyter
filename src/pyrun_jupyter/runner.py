@@ -33,6 +33,7 @@ class JupyterRunner:
         token: str = None,
         kernel_name: str = "python3",
         auto_start_kernel: bool = True,
+        reuse_kernel: bool = True,
     ):
         """Initialize JupyterRunner.
         
@@ -41,16 +42,21 @@ class JupyterRunner:
             token: Authentication token for the server
             kernel_name: Name of kernel to use (default: python3)
             auto_start_kernel: Whether to start a kernel automatically on first run
+            reuse_kernel: Whether to reuse existing kernel on reconnection (default: True)
         """
         self.url = url.rstrip("/")
         self.token = token
         self.kernel_name = kernel_name
         self.auto_start_kernel = auto_start_kernel
+        self.reuse_kernel = reuse_kernel
         
-        self._kernel_manager = KernelManager(url, token)
-        self._contents_manager = ContentsManager(url, token)
+        self._kernel_manager = KernelManager(self.url, token)
+        self._contents_manager = ContentsManager(self.url, token)
         self._kernel_id: Optional[str] = None
         self._websocket: Optional[KernelWebSocket] = None
+        
+        # Validate connection on initialization
+        self._validate_connection()
     
     @property
     def kernel_id(self) -> Optional[str]:
@@ -115,13 +121,53 @@ class JupyterRunner:
         self._websocket = KernelWebSocket(ws_url)
         self._websocket.connect()
     
+    def _validate_connection(self) -> None:
+        """Validate connection to Jupyter server.
+        
+        Raises:
+            ConnectionError: If cannot connect to server or authentication fails
+        """
+        try:
+            # Try to list kernels to validate connection
+            self._kernel_manager.list_kernels()
+        except Exception as e:
+            raise ConnectionError(f"Failed to connect to Jupyter server at {self.url}: {e}")
+    
+    def _find_reusable_kernel(self) -> Optional[str]:
+        """Find an existing kernel that can be reused.
+        
+        Returns:
+            Kernel ID if found, None otherwise
+        """
+        if not self.reuse_kernel:
+            return None
+        
+        try:
+            kernels = self._kernel_manager.list_kernels()
+            for kernel in kernels:
+                if kernel.get("name") == self.kernel_name:
+                    return kernel.get("id")
+        except Exception:
+            pass
+        return None
+    
     def _ensure_kernel(self) -> None:
-        """Ensure a kernel is running, start one if needed."""
-        if not self._kernel_id:
-            if self.auto_start_kernel:
-                self.start_kernel()
+        """Ensure a kernel is running, start one if needed.
+        
+        If reuse_kernel is True, will try to connect to existing kernel first.
+        """
+        if self._kernel_id:
+            return
+        
+        if self.auto_start_kernel:
+            # Try to reuse existing kernel first
+            existing_kernel = self._find_reusable_kernel()
+            if existing_kernel:
+                self.connect_to_kernel(existing_kernel)
             else:
-                raise KernelError("No kernel running. Call start_kernel() first.")
+                self.start_kernel()
+        else:
+            raise KernelError("No kernel running. Call start_kernel() first.")
     
     def run(self, code: str, timeout: float = 60.0) -> ExecutionResult:
         """Execute Python code on the remote kernel.
