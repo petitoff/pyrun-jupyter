@@ -7,10 +7,10 @@ from typing import Dict, Any, Optional, List
 
 import requests
 
-from .exceptions import ConnectionError, Py2JupyterError
+from .exceptions import ConnectionError, PyrunJupyterError
 
 
-class FileTransferError(Py2JupyterError):
+class FileTransferError(PyrunJupyterError):
     """Raised when file upload/download fails."""
     pass
 

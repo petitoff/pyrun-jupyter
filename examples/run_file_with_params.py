@@ -16,7 +16,7 @@ def main():
         # Create a sample script to run
         script_path = Path("temp_training_script.py")
         script_path.write_text("""
-# This script uses parameters injected by py2jupyter
+# This script uses parameters injected by pyrun_jupyter
 print(f"Training Configuration:")
 print(f"  Learning Rate: {learning_rate}")
 print(f"  Epochs: {epochs}")

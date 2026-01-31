@@ -1,22 +1,22 @@
-"""Custom exceptions for py2jupyter."""
+"""Custom exceptions for pyrun_jupyter."""
 
 
-class Py2JupyterError(Exception):
-    """Base exception for py2jupyter."""
+class PyrunJupyterError(Exception):
+    """Base exception for pyrun_jupyter."""
     pass
 
 
-class ConnectionError(Py2JupyterError):
+class ConnectionError(PyrunJupyterError):
     """Raised when connection to Jupyter server fails."""
     pass
 
 
-class KernelError(Py2JupyterError):
+class KernelError(PyrunJupyterError):
     """Raised when kernel operations fail."""
     pass
 
 
-class ExecutionError(Py2JupyterError):
+class ExecutionError(PyrunJupyterError):
     """Raised when code execution fails."""
     
     def __init__(self, message: str, ename: str = None, evalue: str = None, traceback: list = None):

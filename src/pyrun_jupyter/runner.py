@@ -8,7 +8,7 @@ from .kernel import KernelManager
 from .contents import ContentsManager, FileTransferError
 from .websocket import KernelWebSocket
 from .result import ExecutionResult
-from .exceptions import Py2JupyterError, KernelError, ExecutionError
+from .exceptions import PyrunJupyterError, KernelError, ExecutionError
 
 
 class JupyterRunner:
@@ -182,7 +182,7 @@ class JupyterRunner:
         Returns:
             Python code string that defines the parameters
         """
-        lines = ["# Parameters injected by py2jupyter"]
+        lines = ["# Parameters injected by pyrun_jupyter"]
         for name, value in params.items():
             lines.append(f"{name} = {repr(value)}")
         return "\n".join(lines)

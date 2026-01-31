@@ -16,7 +16,7 @@ from .runner import JupyterRunner
 from .result import ExecutionResult
 from .contents import FileTransferError
 from .exceptions import (
-    Py2JupyterError,
+    PyrunJupyterError,
     ConnectionError,
     KernelError,
     ExecutionError,
@@ -26,7 +26,7 @@ __version__ = "0.2.0"
 __all__ = [
     "JupyterRunner",
     "ExecutionResult",
-    "Py2JupyterError",
+    "PyrunJupyterError",
     "ConnectionError",
     "KernelError",
     "ExecutionError",

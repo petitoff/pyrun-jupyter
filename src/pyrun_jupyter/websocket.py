@@ -152,7 +152,7 @@ class KernelWebSocket:
             "header": {
                 "msg_id": self._msg_id,
                 "msg_type": "execute_request",
-                "username": "py2jupyter",
+                "username": "pyrun_jupyter",
                 "session": str(uuid.uuid4()),
                 "version": "5.3",
             },
