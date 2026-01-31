@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyrun-jupyter"
-version = "0.2.0"
+version = "0.3.0"
 description = "Execute Python .py files on remote Jupyter servers"
 readme = "README.md"
 license = {text = "MIT"}
