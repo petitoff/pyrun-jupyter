@@ -150,6 +150,56 @@ The `run()` and `run_file()` methods return an `ExecutionResult` object:
 | `data` | dict | Rich output (text/plain, text/html, etc.) |
 | `execution_count` | int | Jupyter cell execution count |
 
+## File Transfer
+
+### Upload/Download via Contents API
+
+```python
+with JupyterRunner("http://localhost:8888", token="xxx") as runner:
+    # Upload single file
+    runner.upload_file("local_data.csv", "data/input.csv")
+    
+    # Upload entire directory
+    runner.upload_directory(
+        "./my_project",
+        remote_dir="project",
+        pattern="**/*.py",
+        exclude_patterns=["__pycache__", "*.pyc"]
+    )
+    
+    # Download file
+    runner.download_file("output/model.pt", "./local/model.pt")
+    
+    # Download multiple files
+    runner.download_files(
+        ["output/model.pt", "output/metrics.json"],
+        local_dir="./results"
+    )
+```
+
+### Upload/Download via Kernel (for Kaggle, etc.)
+
+Some environments (like Kaggle) don't support the Contents API. Use kernel-based methods:
+
+```python
+with JupyterRunner(kaggle_url) as runner:
+    # Upload directory via kernel execution
+    runner.upload_directory_via_kernel(
+        "./my_project",
+        remote_dir="project"
+    )
+    
+    # Run your training
+    runner.run("exec(open('project/train.py').read())")
+    
+    # Download results via kernel
+    runner.download_kernel_files(
+        ["model.pth", "results.png"],
+        local_dir="./results",
+        working_dir="project"
+    )
+```
+
 ## Configuration
 
 | Parameter | Default | Description |
@@ -158,6 +208,7 @@ The `run()` and `run_file()` methods return an `ExecutionResult` object:
 | `token` | None | Authentication token |
 | `kernel_name` | "python3" | Kernel specification to use |
 | `auto_start_kernel` | True | Start kernel automatically on first run |
+| `reuse_kernel` | True | Reuse existing kernel if available |
 
 ## Getting Your Jupyter Token
 
