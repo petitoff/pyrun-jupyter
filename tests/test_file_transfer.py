@@ -193,6 +193,31 @@ class TestDownloadKernelFiles:
             for path in downloaded:
                 assert path.read_bytes() == contents[path.name]
 
+    @patch.object(JupyterRunner, '_validate_connection')
+    def test_download_kernel_files_preserves_relative_paths_when_flatten_disabled(self, mock_validate):
+        """Nested artifact paths should be recreated locally when flatten=False."""
+        runner = JupyterRunner("http://localhost:8888", auto_start_kernel=False)
+        runner._kernel_id = "test-kernel"
+        runner._websocket = Mock()
+
+        content = b"checkpoint"
+        encoded = base64.b64encode(content).decode('ascii')
+        runner._websocket.execute.return_value = ExecutionResult(
+            stdout=f"{encoded}\n__FILE_OK__"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            downloaded = runner.download_kernel_files(
+                ["models/best/model.pth"],
+                local_dir=tmpdir,
+                working_dir="project",
+                flatten=False,
+            )
+
+            assert len(downloaded) == 1
+            assert downloaded[0] == Path(tmpdir) / "models" / "best" / "model.pth"
+            assert downloaded[0].read_bytes() == content
+
 
 class TestUploadDirectory:
     """Test upload_directory method (Contents API)."""

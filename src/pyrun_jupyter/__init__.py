@@ -10,6 +10,7 @@ Main Class:
         Code Execution:
             - run(code: str) -> ExecutionResult
             - run_file(path, params) -> ExecutionResult
+            - run_project(project_dir, entrypoint, artifact_paths) -> ExecutionResult
         
         File Transfer (Contents API):
             - upload_file(local, remote)
@@ -50,7 +51,7 @@ Basic Usage:
         result = runner.run("print('Hello!')")
         print(result.stdout)
 
-File Transfer (for Kaggle and similar):
+        File Transfer (for Kaggle and similar):
     with JupyterRunner(kaggle_url) as runner:
         # Upload project
         runner.upload_directory_via_kernel("./src", "project")
@@ -60,6 +61,15 @@ File Transfer (for Kaggle and similar):
         
         # Download results
         runner.download_kernel_files(["model.pth"], "./output", "project")
+
+Project Workflow:
+    with JupyterRunner(kaggle_url) as runner:
+        result = runner.run_project(
+            "./my_project",
+            "train.py",
+            artifact_paths=["outputs/*.pth", "metrics.json"],
+        )
+        print(result.data["artifacts"])
 
 Exceptions:
     - PyrunJupyterError: Base exception

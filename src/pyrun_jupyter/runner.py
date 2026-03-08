@@ -25,15 +25,17 @@ Typical usage:
 from __future__ import annotations
 
 import base64
+import json
 import os
-from pathlib import Path
-from typing import Optional, Dict, Any, Union, List, TYPE_CHECKING
+import posixpath
+from pathlib import Path, PurePosixPath
+from typing import Optional, Dict, Any, Union, List, Tuple
 
 from .kernel import KernelManager
-from .contents import ContentsManager, FileTransferError
+from .contents import ContentsManager
 from .websocket import KernelWebSocket
 from .result import ExecutionResult
-from .exceptions import PyrunJupyterError, KernelError, ExecutionError
+from .exceptions import ConnectionError, KernelError
 
 
 class JupyterRunner:
@@ -84,6 +86,19 @@ class JupyterRunner:
                 )
     """
     
+    DEFAULT_EXCLUDE_PATTERNS = [
+        "__pycache__",
+        "*.pyc",
+        ".git",
+        ".venv",
+        "venv",
+        "*.egg-info",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ipynb_checkpoints",
+    ]
+    DEFAULT_REMOTE_PROJECT_DIR = ".pyrun_jupyter/project"
+
     # Class-level type hints for better IDE support
     url: str
     token: Optional[str]
@@ -303,7 +318,266 @@ class JupyterRunner:
         for name, value in params.items():
             lines.append(f"{name} = {repr(value)}")
         return "\n".join(lines)
-    
+
+    def _iter_local_files(
+        self,
+        local_dir: Union[str, Path],
+        pattern: str = "**/*",
+        exclude_patterns: List[str] = None
+    ) -> List[Tuple[Path, PurePosixPath]]:
+        """Collect local files and their relative remote paths."""
+        local_dir = Path(local_dir)
+        if not local_dir.is_dir():
+            raise ValueError(f"Not a directory: {local_dir}")
+
+        exclude_patterns = exclude_patterns or self.DEFAULT_EXCLUDE_PATTERNS
+        files: List[Tuple[Path, PurePosixPath]] = []
+
+        for local_path in local_dir.glob(pattern):
+            if not local_path.is_file():
+                continue
+
+            rel_path = local_path.relative_to(local_dir)
+            if self._should_exclude(rel_path, exclude_patterns):
+                continue
+
+            files.append((local_path, PurePosixPath(rel_path.as_posix())))
+
+        return files
+
+    def _should_exclude(self, rel_path: Path, exclude_patterns: List[str]) -> bool:
+        """Check whether a relative path should be excluded."""
+        rel_posix = rel_path.as_posix()
+        rel_parts = rel_path.parts
+
+        for pattern in exclude_patterns:
+            normalized = pattern.strip()
+            if not normalized:
+                continue
+
+            if rel_path.match(normalized) or Path(rel_posix).match(normalized):
+                return True
+
+            for part in rel_parts:
+                if Path(part).match(normalized):
+                    return True
+
+        return False
+
+    def _join_remote_path(self, *parts: str) -> str:
+        """Join remote path fragments using POSIX separators."""
+        cleaned = [part.strip("/") for part in parts if part]
+        if not cleaned:
+            return ""
+        return posixpath.join(*cleaned)
+
+    def _normalize_entrypoint(
+        self,
+        project_dir: Union[str, Path],
+        entrypoint: Union[str, Path]
+    ) -> PurePosixPath:
+        """Normalize the entrypoint to a path relative to the project root."""
+        project_dir = Path(project_dir).resolve()
+        entrypoint_path = Path(entrypoint)
+
+        if entrypoint_path.is_absolute():
+            resolved_entrypoint = entrypoint_path.resolve()
+        else:
+            resolved_entrypoint = (project_dir / entrypoint_path).resolve()
+
+        try:
+            relative = resolved_entrypoint.relative_to(project_dir)
+        except ValueError as exc:
+            raise ValueError(
+                f"Entrypoint {resolved_entrypoint} must be inside project directory {project_dir}"
+            ) from exc
+
+        if not resolved_entrypoint.exists():
+            raise FileNotFoundError(f"Entrypoint not found: {resolved_entrypoint}")
+        if not resolved_entrypoint.is_file():
+            raise ValueError(f"Entrypoint is not a file: {resolved_entrypoint}")
+        if resolved_entrypoint.suffix != ".py":
+            raise ValueError(f"Expected .py entrypoint, got: {resolved_entrypoint.suffix}")
+
+        return PurePosixPath(relative.as_posix())
+
+    def _prepare_remote_project_dir(self, remote_dir: str) -> None:
+        """Remove and recreate the managed remote project directory."""
+        result = self.run(f"""
+import os
+import shutil
+
+remote_dir = {remote_dir!r}
+if os.path.exists(remote_dir):
+    shutil.rmtree(remote_dir)
+os.makedirs(remote_dir, exist_ok=True)
+print("__REMOTE_DIR_READY__")
+""")
+        if "__REMOTE_DIR_READY__" not in result.stdout:
+            raise KernelError(f"Failed to prepare remote directory: {remote_dir}")
+
+    def _sync_project_via_kernel(
+        self,
+        project_dir: Union[str, Path],
+        remote_dir: str,
+        pattern: str = "**/*",
+        exclude_patterns: List[str] = None
+    ) -> List[str]:
+        """Upload a local project directory into a clean remote directory."""
+        project_dir = Path(project_dir)
+        files = self._iter_local_files(project_dir, pattern=pattern, exclude_patterns=exclude_patterns)
+        uploaded: List[str] = []
+
+        for local_path, rel_remote in files:
+            remote_path = self._join_remote_path(remote_dir, rel_remote.as_posix())
+            if not self.upload_via_kernel(local_path, remote_path):
+                raise KernelError(f"Failed to upload {local_path} to {remote_path}")
+            uploaded.append(remote_path)
+
+        return uploaded
+
+    def _build_project_run_code(
+        self,
+        remote_dir: str,
+        entrypoint: PurePosixPath,
+        params: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Build Python code that runs an uploaded project entrypoint."""
+        entrypoint_str = entrypoint.as_posix()
+        params_payload = json.dumps(params or {})
+        return f"""
+import json
+import os
+import runpy
+import sys
+
+project_dir = {remote_dir!r}
+entrypoint = {entrypoint_str!r}
+params = json.loads({json.dumps(params_payload)!r})
+entrypoint_path = os.path.join(project_dir, entrypoint)
+
+if project_dir not in sys.path:
+    sys.path.insert(0, project_dir)
+
+os.chdir(project_dir)
+globals().update(params)
+runpy.run_path(entrypoint_path, run_name="__main__", init_globals=params)
+"""
+
+    def _resolve_kernel_artifacts(
+        self,
+        patterns: List[str],
+        working_dir: str = ""
+    ) -> List[str]:
+        """Resolve explicit remote file paths or globs via kernel execution."""
+        if not patterns:
+            return []
+
+        result = self.run(f"""
+import glob
+import json
+import os
+
+working_dir = {working_dir!r}
+patterns = {patterns!r}
+matches = []
+seen = set()
+
+for pattern in patterns:
+    if os.path.isabs(pattern):
+        search_pattern = pattern
+        base_dir = ""
+    else:
+        search_pattern = os.path.join(working_dir, pattern) if working_dir else pattern
+        base_dir = working_dir
+
+    resolved = sorted(glob.glob(search_pattern, recursive=True))
+    if not resolved and os.path.exists(search_pattern):
+        resolved = [search_pattern]
+
+    for candidate in resolved:
+        if not os.path.isfile(candidate):
+            continue
+        relative = os.path.relpath(candidate, base_dir) if base_dir else candidate
+        relative = relative.replace("\\\\", "/")
+        if relative not in seen:
+            seen.add(relative)
+            matches.append(relative)
+
+print("__PYRUN_ARTIFACTS__")
+print(json.dumps(matches))
+""")
+
+        marker = "__PYRUN_ARTIFACTS__"
+        stdout = result.stdout.strip()
+        if marker not in stdout:
+            raise KernelError("Failed to resolve artifact paths on remote kernel")
+
+        payload = stdout.split(marker, 1)[1].strip()
+        try:
+            resolved = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise KernelError("Remote kernel returned invalid artifact metadata") from exc
+
+        if not isinstance(resolved, list):
+            raise KernelError("Remote kernel returned an invalid artifact list")
+
+        return [str(path) for path in resolved]
+
+    def run_project(
+        self,
+        project_dir: Union[str, Path],
+        entrypoint: Union[str, Path],
+        artifact_paths: Optional[List[str]] = None,
+        local_artifact_dir: Union[str, Path] = "artifacts",
+        remote_dir: Optional[str] = None,
+        exclude_patterns: Optional[List[str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: float = 60.0,
+    ) -> ExecutionResult:
+        """Sync a project, run an entrypoint remotely, and download artifacts."""
+        project_dir = Path(project_dir).resolve()
+        if not project_dir.is_dir():
+            raise ValueError(f"Not a directory: {project_dir}")
+
+        relative_entrypoint = self._normalize_entrypoint(project_dir, entrypoint)
+        remote_project_dir = remote_dir or self.DEFAULT_REMOTE_PROJECT_DIR
+
+        self._prepare_remote_project_dir(remote_project_dir)
+        self._sync_project_via_kernel(
+            project_dir,
+            remote_project_dir,
+            exclude_patterns=exclude_patterns,
+        )
+
+        result = self.run(
+            self._build_project_run_code(
+                remote_project_dir,
+                relative_entrypoint,
+                params=params,
+            ),
+            timeout=timeout,
+        )
+
+        resolved_artifacts: List[str] = []
+        if artifact_paths:
+            resolved_artifacts = self._resolve_kernel_artifacts(
+                artifact_paths,
+                working_dir=remote_project_dir,
+            )
+
+        local_paths: List[Path] = []
+        if resolved_artifacts:
+            local_paths = self.download_kernel_files(
+                resolved_artifacts,
+                local_dir=local_artifact_dir,
+                working_dir=remote_project_dir,
+                flatten=False,
+            )
+
+        result.data.setdefault("artifacts", [str(path) for path in local_paths])
+        return result
+
     # ==================== File Transfer Methods ====================
     
     def upload_file(
@@ -352,35 +626,15 @@ class JupyterRunner:
             >>> runner.upload_directory("./data", "data", exclude_patterns=["*.tmp", "__pycache__"])
         """
         local_dir = Path(local_dir)
-        if not local_dir.is_dir():
-            raise ValueError(f"Not a directory: {local_dir}")
-        
-        exclude_patterns = exclude_patterns or ["__pycache__", "*.pyc", ".git", ".venv", "*.egg-info"]
+        exclude_patterns = exclude_patterns or self.DEFAULT_EXCLUDE_PATTERNS
         uploaded = []
-        
-        for local_path in local_dir.glob(pattern):
-            if not local_path.is_file():
-                continue
-            
-            # Check exclusions
-            rel_path = local_path.relative_to(local_dir)
-            skip = False
-            for exc in exclude_patterns:
-                if any(part.startswith(exc.replace("*", "")) or 
-                       Path(part).match(exc) for part in rel_path.parts):
-                    skip = True
-                    break
-                if rel_path.match(exc):
-                    skip = True
-                    break
-            
-            if skip:
-                continue
-            
-            # Build remote path
-            remote_path = f"{remote_dir}/{rel_path}".lstrip("/") if remote_dir else str(rel_path)
-            remote_path = remote_path.replace("\\", "/")  # Normalize for Unix
-            
+
+        for local_path, rel_path in self._iter_local_files(
+            local_dir,
+            pattern=pattern,
+            exclude_patterns=exclude_patterns,
+        ):
+            remote_path = self._join_remote_path(remote_dir, rel_path.as_posix())
             try:
                 self.upload_file(local_path, remote_path)
                 uploaded.append(remote_path)
@@ -454,7 +708,8 @@ class JupyterRunner:
         self,
         remote_paths: List[str],
         local_dir: Union[str, Path],
-        working_dir: str = ""
+        working_dir: str = "",
+        flatten: bool = True,
     ) -> List[Path]:
         """Download files created by kernel execution (e.g., on Kaggle).
         
@@ -521,7 +776,8 @@ else:
                 b64_content = output.replace("__FILE_OK__", "").strip()
                 try:
                     file_bytes = base64.b64decode(b64_content)
-                    local_path = local_dir / Path(filename).name
+                    local_path = local_dir / Path(filename).name if flatten else local_dir / Path(filename)
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
                     local_path.write_bytes(file_bytes)
                     downloaded.append(local_path)
                 except Exception as e:
@@ -602,35 +858,15 @@ print("__UPLOAD_OK__")
             >>> runner.upload_directory_via_kernel("./my_project", "project")
         """
         local_dir = Path(local_dir)
-        if not local_dir.is_dir():
-            raise ValueError(f"Not a directory: {local_dir}")
-        
-        exclude_patterns = exclude_patterns or ["__pycache__", "*.pyc", ".git", ".venv", "*.egg-info"]
+        exclude_patterns = exclude_patterns or self.DEFAULT_EXCLUDE_PATTERNS
         uploaded = []
-        
-        for local_path in local_dir.glob(pattern):
-            if not local_path.is_file():
-                continue
-            
-            # Check exclusions
-            rel_path = local_path.relative_to(local_dir)
-            skip = False
-            for exc in exclude_patterns:
-                if any(part.startswith(exc.replace("*", "")) or 
-                       Path(part).match(exc) for part in rel_path.parts):
-                    skip = True
-                    break
-                if rel_path.match(exc):
-                    skip = True
-                    break
-            
-            if skip:
-                continue
-            
-            # Build remote path
-            remote_path = f"{remote_dir}/{rel_path}".lstrip("/") if remote_dir else str(rel_path)
-            remote_path = remote_path.replace("\\", "/")
-            
+
+        for local_path, rel_path in self._iter_local_files(
+            local_dir,
+            pattern=pattern,
+            exclude_patterns=exclude_patterns,
+        ):
+            remote_path = self._join_remote_path(remote_dir, rel_path.as_posix())
             try:
                 if self.upload_via_kernel(local_path, remote_path):
                     uploaded.append(remote_path)

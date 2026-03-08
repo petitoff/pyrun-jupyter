@@ -113,6 +113,34 @@ class JupyterRunner:
             result = runner.run_file("train.py", params={"lr": 0.01, "epochs": 100})
         """
         ...
+
+    def run_project(
+        self,
+        project_dir: Union[str, Path],
+        entrypoint: Union[str, Path],
+        artifact_paths: Optional[List[str]] = None,
+        local_artifact_dir: Union[str, Path] = "artifacts",
+        remote_dir: Optional[str] = None,
+        exclude_patterns: Optional[List[str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: float = 60.0,
+    ) -> ExecutionResult:
+        """Upload a project, execute an entrypoint remotely, and download artifacts.
+
+        Args:
+            project_dir: Local project directory to sync
+            entrypoint: Entrypoint file relative to project_dir
+            artifact_paths: Optional remote file paths or globs to download after execution
+            local_artifact_dir: Local directory where artifacts should be saved
+            remote_dir: Optional remote workspace directory
+            exclude_patterns: Optional sync exclusion patterns
+            params: Optional parameters exposed to the entrypoint
+            timeout: Maximum execution time in seconds
+
+        Returns:
+            ExecutionResult with downloaded artifact paths stored in data["artifacts"]
+        """
+        ...
     
     # ==================== Kernel Management ====================
     
@@ -316,6 +344,7 @@ class JupyterRunner:
         remote_paths: List[str],
         local_dir: Union[str, Path],
         working_dir: str = "",
+        flatten: bool = True,
     ) -> List[Path]:
         """Download files created by kernel execution (for Kaggle and similar platforms).
         
@@ -326,6 +355,7 @@ class JupyterRunner:
             remote_paths: List of file paths relative to working_dir
             local_dir: Local directory to save files
             working_dir: Working directory on server where files are located
+            flatten: If True, save files directly in local_dir using only the basename
         
         Returns:
             List of paths to downloaded files

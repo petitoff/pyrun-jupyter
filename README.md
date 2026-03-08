@@ -1,6 +1,6 @@
 # pyrun-jupyter
 
-Execute Python `.py` files on remote Jupyter servers.
+Execute Python projects and `.py` files on remote Jupyter servers.
 
 [![PyPI version](https://img.shields.io/pypi/v/pyrun-jupyter)](https://pypi.org/project/pyrun-jupyter/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -18,28 +18,73 @@ pip install pyrun-jupyter
 ```python
 from pyrun_jupyter import JupyterRunner
 
-# Connect to your Jupyter server
-runner = JupyterRunner("http://localhost:8888", token="your_token")
-
-# Run a .py file on the remote server
-result = runner.run_file("script.py")
-print(result.stdout)
-
-# Or run code directly
-result = runner.run("print('Hello from Jupyter!')")
-print(result.stdout)
+# Kaggle-style workflow: sync a local project, run an entrypoint, download artifacts
+with JupyterRunner("http://localhost:8888", token="your_token") as runner:
+    result = runner.run_project(
+        "./my_project",
+        "train.py",
+        artifact_paths=["outputs/*.pth", "outputs/metrics.json"],
+        local_artifact_dir="./artifacts",
+    )
+    print(result.stdout)
+    print(result.data["artifacts"])
 ```
 
 ## Features
 
-- 🐍 Execute standard `.py` files on remote Jupyter kernels
+- 🐍 Execute whole local Python projects on remote Jupyter kernels
+- 📁 Sync a project directory so imports across files keep working
+- 🎯 Run a chosen project entrypoint from the synced remote workspace
 - 📤 Pass parameters to your scripts
+- 📦 Download training artifacts such as models, plots, and metrics
 - 📥 Capture stdout, stderr, and rich outputs
 - 🔄 Kernel management (start, stop, restart)
 - 🔌 Connect to existing kernels
 - ⚡ Context manager support for automatic cleanup
 
 ## Usage Examples
+
+### Project Workflow for Kaggle and Other Remote Kernels
+
+This is the recommended workflow for normal `.py` projects. `run_project()` uploads a local
+directory, runs the selected entrypoint inside that synced directory, keeps relative imports
+working, and downloads requested artifacts afterward.
+
+```python
+from pyrun_jupyter import JupyterRunner
+
+with JupyterRunner("http://kaggle-jupyter-server", token="xxx") as runner:
+    result = runner.run_project(
+        "./trainer",
+        "train.py",
+        params={
+            "epochs": 10,
+            "learning_rate": 0.001,
+        },
+        artifact_paths=[
+            "outputs/*.pth",
+            "outputs/metrics.json",
+        ],
+        local_artifact_dir="./results",
+    )
+
+    print(result.stdout)
+    print(result.data["artifacts"])
+```
+
+Example project layout:
+
+```text
+trainer/
+├── train.py
+├── model.py
+├── utils/
+│   └── data.py
+└── outputs/
+```
+
+If `train.py` imports `model.py` or modules under `utils/`, those imports continue to work
+after the project directory is synced to the remote kernel.
 
 ### Basic Usage
 
@@ -93,6 +138,17 @@ print(f"Training with lr={learning_rate}, epochs={epochs}")
 # ... your training code
 ```
 
+You can also pass parameters to a project entrypoint:
+
+```python
+with JupyterRunner("http://localhost:8888", token="xxx") as runner:
+    result = runner.run_project(
+        "./trainer",
+        "train.py",
+        params={"epochs": 50, "batch_size": 32},
+    )
+```
+
 ### Handling Errors
 
 ```python
@@ -135,9 +191,31 @@ runner.restart_kernel()
 runner.stop_kernel()
 ```
 
+## CLI
+
+### Project-Oriented Command
+
+```bash
+pyrun-jupyter run-project ./trainer train.py \
+  --url http://localhost:8888 \
+  --token xxx \
+  --artifact "outputs/*.pth" \
+  --artifact "outputs/metrics.json" \
+  --artifact-dir ./results \
+  --exclude .git \
+  --exclude __pycache__
+```
+
+### Low-Level Commands
+
+```bash
+pyrun-jupyter run-file script.py --url http://localhost:8888 --token xxx
+pyrun-jupyter run "print('hello')" --url http://localhost:8888 --token xxx
+```
+
 ## ExecutionResult
 
-The `run()` and `run_file()` methods return an `ExecutionResult` object:
+The `run()`, `run_file()`, and `run_project()` methods return an `ExecutionResult` object:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -149,6 +227,9 @@ The `run()` and `run_file()` methods return an `ExecutionResult` object:
 | `error_traceback` | list | Full traceback |
 | `data` | dict | Rich output (text/plain, text/html, etc.) |
 | `execution_count` | int | Jupyter cell execution count |
+
+When using `run_project()`, downloaded local artifact paths are stored in
+`result.data["artifacts"]`.
 
 ## File Transfer
 
@@ -183,22 +264,36 @@ Some environments (like Kaggle) don't support the Contents API. Use kernel-based
 
 ```python
 with JupyterRunner(kaggle_url) as runner:
-    # Upload directory via kernel execution
-    runner.upload_directory_via_kernel(
+    result = runner.run_project(
         "./my_project",
-        remote_dir="project"
-    )
-    
-    # Run your training
-    runner.run("exec(open('project/train.py').read())")
-    
-    # Download results via kernel
-    runner.download_kernel_files(
-        ["model.pth", "results.png"],
-        local_dir="./results",
-        working_dir="project"
+        "train.py",
+        artifact_paths=["outputs/*.pth", "outputs/*.png"],
+        local_artifact_dir="./results",
     )
 ```
+
+For advanced workflows, the lower-level helpers are still available:
+
+```python
+with JupyterRunner(kaggle_url) as runner:
+    runner.upload_directory_via_kernel("./my_project", remote_dir="project")
+    runner.run("import os; os.chdir('project'); exec(open('train.py').read())")
+    runner.download_kernel_files(
+        ["outputs/model.pth", "outputs/results.png"],
+        local_dir="./results",
+        working_dir="project",
+        flatten=False,
+    )
+```
+
+## Notes for Kaggle Workflows
+
+- `run_project()` is the recommended API for Kaggle-oriented development with normal `.py` files.
+- The package syncs project files, not Python package dependencies. Third-party libraries are
+  expected to already be installed in the remote environment.
+- Each `run_project()` call prepares a fresh remote project directory by default, so stale files
+  from previous runs do not affect the next execution.
+- Artifact paths can be exact file paths or glob patterns relative to the remote project root.
 
 ## Configuration
 

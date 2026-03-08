@@ -6,6 +6,7 @@ Main exports:
         Methods:
             run(code) -> ExecutionResult
             run_file(path, params) -> ExecutionResult
+            run_project(project_dir, entrypoint, artifact_paths) -> ExecutionResult
             upload_directory_via_kernel(local_dir, remote_dir) -> list[str]
             download_kernel_files(paths, local_dir, working_dir) -> list[Path]
             upload_file(local, remote)
