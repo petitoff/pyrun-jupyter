@@ -117,17 +117,15 @@ class TestJupyterRunner:
         """Entrypoint must stay inside the synced project directory."""
         runner = JupyterRunner("http://localhost:8888")
 
-        with tempfile.TemporaryDirectory() as project_dir, tempfile.NamedTemporaryFile(
-            suffix=".py",
-            delete=False,
-        ) as external_file:
-            external_path = Path(external_file.name)
-
+        with tempfile.TemporaryDirectory() as project_dir, tempfile.TemporaryDirectory() as external_dir:
+            external_path = Path(external_dir) / "external.py"
+            external_path.write_text("print('external')", encoding="utf-8")
             try:
                 with pytest.raises(ValueError, match="must be inside project directory"):
                     runner._normalize_entrypoint(project_dir, external_path)
             finally:
-                external_path.unlink()
+                if external_path.exists():
+                    external_path.unlink()
 
     @patch.object(JupyterRunner, '_validate_connection')
     @patch.object(JupyterRunner, 'download_kernel_files')
