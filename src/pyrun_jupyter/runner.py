@@ -407,7 +407,15 @@ class JupyterRunner:
 import os
 import shutil
 
+project_root = globals().get("_PYRUN_JUPYTER_ROOT")
+if project_root is None:
+    project_root = os.getcwd()
+    globals()["_PYRUN_JUPYTER_ROOT"] = project_root
+
 remote_dir = {remote_dir!r}
+if not os.path.isabs(remote_dir):
+    remote_dir = os.path.abspath(os.path.join(project_root, remote_dir))
+
 if os.path.exists(remote_dir):
     shutil.rmtree(remote_dir)
 os.makedirs(remote_dir, exist_ok=True)
@@ -444,7 +452,6 @@ print("__REMOTE_DIR_READY__")
     ) -> str:
         """Build Python code that runs an uploaded project entrypoint."""
         entrypoint_str = entrypoint.as_posix()
-        params_payload = json.dumps(params or {})
         return f"""
 import json
 import os
@@ -452,8 +459,16 @@ import runpy
 import sys
 
 project_dir = {remote_dir!r}
+project_root = globals().get("_PYRUN_JUPYTER_ROOT")
+if project_root is None:
+    project_root = os.getcwd()
+    globals()["_PYRUN_JUPYTER_ROOT"] = project_root
+
+if not os.path.isabs(project_dir):
+    project_dir = os.path.abspath(os.path.join(project_root, project_dir))
+
 entrypoint = {entrypoint_str!r}
-params = json.loads({json.dumps(params_payload)!r})
+params = json.loads({json.dumps(params or {})!r})
 entrypoint_path = os.path.join(project_dir, entrypoint)
 
 if project_dir not in sys.path:
@@ -478,7 +493,15 @@ import glob
 import json
 import os
 
+project_root = globals().get("_PYRUN_JUPYTER_ROOT")
+if project_root is None:
+    project_root = os.getcwd()
+    globals()["_PYRUN_JUPYTER_ROOT"] = project_root
+
 working_dir = {working_dir!r}
+if working_dir and not os.path.isabs(working_dir):
+    working_dir = os.path.abspath(os.path.join(project_root, working_dir))
+
 patterns = {patterns!r}
 matches = []
 seen = set()
@@ -752,6 +775,14 @@ import os
 import base64
 
 filepath = {repr(full_path)}
+project_root = globals().get("_PYRUN_JUPYTER_ROOT")
+if project_root is None:
+    project_root = os.getcwd()
+    globals()["_PYRUN_JUPYTER_ROOT"] = project_root
+
+if not os.path.isabs(filepath):
+    filepath = os.path.abspath(os.path.join(project_root, filepath))
+
 if os.path.exists(filepath):
     with open(filepath, 'rb') as f:
         content = base64.b64encode(f.read()).decode('ascii')
@@ -824,6 +855,14 @@ import os
 import base64
 
 remote_path = {repr(remote_path)}
+project_root = globals().get("_PYRUN_JUPYTER_ROOT")
+if project_root is None:
+    project_root = os.getcwd()
+    globals()["_PYRUN_JUPYTER_ROOT"] = project_root
+
+if not os.path.isabs(remote_path):
+    remote_path = os.path.abspath(os.path.join(project_root, remote_path))
+
 remote_dir = os.path.dirname(remote_path)
 if remote_dir:
     os.makedirs(remote_dir, exist_ok=True)

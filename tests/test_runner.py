@@ -113,6 +113,21 @@ class TestJupyterRunner:
         assert "disconnected" in repr_str
 
     @patch.object(JupyterRunner, '_validate_connection')
+    def test_build_project_run_code_serializes_params_as_dict(self, mock_validate):
+        """Project execution code should deserialize params into a dict, not a JSON string."""
+        runner = JupyterRunner("http://localhost:8888")
+
+        code = runner._build_project_run_code(
+            "remote/project",
+            Path("train.py"),
+            params={"epochs": 3},
+        )
+
+        assert 'project_root = globals().get("_PYRUN_JUPYTER_ROOT")' in code
+        assert 'project_dir = os.path.abspath(os.path.join(project_root, project_dir))' in code
+        assert 'params = json.loads(\'{"epochs": 3}\')' in code
+
+    @patch.object(JupyterRunner, '_validate_connection')
     def test_normalize_entrypoint_rejects_path_outside_project(self, mock_validate):
         """Entrypoint must stay inside the synced project directory."""
         runner = JupyterRunner("http://localhost:8888")
