@@ -28,7 +28,7 @@ attached to a Jupyter server—for example, a machine with an NVIDIA GPU. It can
 
 ## Requirements
 
-- Python 3.8 or newer on the client;
+- Python 3.10 or newer on the client;
 - a reachable Jupyter Server, JupyterLab, or compatible deployment;
 - permission to use `/api/kernels` and kernel WebSocket channels;
 - third-party dependencies required by your program already installed in the
@@ -277,6 +277,7 @@ Kernel-based helpers are available when the Contents API does not map to the
 kernel filesystem:
 
 ```python
+runner.upload_via_kernel("./dataset.parquet", "project/data/dataset.parquet")
 runner.upload_directory_via_kernel("./src", "project/src")
 runner.download_kernel_files(
     ["model.pt", "metrics.json"],
@@ -286,11 +287,27 @@ runner.download_kernel_files(
 )
 ```
 
+`upload_via_kernel()` and project synchronization stream raw binary WebSocket
+buffers in 4 MiB chunks. Every chunk is acknowledged by the kernel, the complete
+file is verified with SHA-256, and the destination is replaced atomically only
+after verification. You can tune the chunk size and acknowledgement timeout for
+a particular proxy:
+
+```python
+runner.upload_via_kernel(
+    "./large-model.safetensors",
+    "models/large-model.safetensors",
+    chunk_size=8 * 1024 * 1024,
+    timeout=300,
+)
+```
+
 ## Operational notes
 
-- File transfer is currently base64-based and buffers complete files in memory.
-  It is suitable for source trees and moderate artifacts, not multi-gigabyte
-  datasets or checkpoints.
+- Kernel uploads use bounded raw binary chunks and do not buffer or base64-encode
+  the complete file. The Jupyter Contents API and `download_kernel_files()` still
+  use base64 as required by their current implementations; downloads therefore
+  remain best suited to moderate-size artifacts.
 - Project dependencies are not synchronized or installed automatically.
 - The default project workspace is recreated for every `run_project()` call.
   Treat a custom `remote_dir` as managed, disposable storage.

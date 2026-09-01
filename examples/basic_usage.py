@@ -9,15 +9,15 @@ JUPYTER_TOKEN = "your_token_here"  # Get from Jupyter startup output
 
 def main():
     """Demonstrate basic pyrun-jupyter usage."""
-    
+
     # Create a runner and connect to server
     runner = JupyterRunner(JUPYTER_URL, token=JUPYTER_TOKEN)
-    
+
     try:
         # Start a kernel
         kernel_id = runner.start_kernel()
         print(f"Started kernel: {kernel_id}")
-        
+
         # Run inline code
         print("\n--- Running inline code ---")
         result = runner.run("""
@@ -29,19 +29,19 @@ print(f"The answer is {x}")
 """)
         print("Output:")
         print(result.stdout)
-        
+
         # Variables persist across runs in the same kernel
         print("\n--- Variables persist ---")
         result = runner.run("print(f'x is still {x}')")
         print("Output:")
         print(result.stdout)
-        
+
         # Handle errors gracefully
         print("\n--- Error handling ---")
         result = runner.run("undefined_variable")
         if result.has_error:
             print(f"Caught error: {result.error_name}: {result.error}")
-        
+
     finally:
         # Always clean up
         runner.stop_kernel()

@@ -21,7 +21,7 @@ class TestUploadViaKernel:
         runner = JupyterRunner("http://localhost:8888", auto_start_kernel=False)
         runner._kernel_id = "test-kernel"
         runner._websocket = Mock()
-        runner._websocket.execute.return_value = ExecutionResult(stdout="__UPLOAD_OK__")
+        runner._websocket.upload_file.return_value = True
 
         with tempfile.NamedTemporaryFile(delete=False, mode="w") as f:
             f.write("print('hello')")
@@ -31,11 +31,12 @@ class TestUploadViaKernel:
             result = runner.upload_via_kernel(temp_path, "remote/test.py")
             assert result is True
 
-            # Verify kernel execution was called
-            assert runner._websocket.execute.called
-            call_code = runner._websocket.execute.call_args[0][0]
-            assert "base64" in call_code
-            assert "remote/test.py" in call_code
+            runner._websocket.upload_file.assert_called_once_with(
+                Path(temp_path),
+                "remote/test.py",
+                chunk_size=4 * 1024 * 1024,
+                timeout=120.0,
+            )
         finally:
             os.unlink(temp_path)
 

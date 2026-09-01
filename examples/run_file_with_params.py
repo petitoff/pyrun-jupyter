@@ -1,6 +1,7 @@
 """Example: Running .py files with parameters."""
 
 from pathlib import Path
+
 from pyrun_jupyter import JupyterRunner
 
 JUPYTER_URL = "http://localhost:8888"
@@ -9,10 +10,9 @@ JUPYTER_TOKEN = "your_token_here"
 
 def main():
     """Demonstrate running .py files with parameter injection."""
-    
+
     # Using context manager (recommended)
     with JupyterRunner(JUPYTER_URL, token=JUPYTER_TOKEN) as runner:
-        
         # Create a sample script to run
         script_path = Path("temp_training_script.py")
         script_path.write_text("""
@@ -30,7 +30,7 @@ for epoch in range(min(epochs, 3)):
 
 print("\\nTraining complete!")
 """)
-        
+
         try:
             # Run the script with parameters
             result = runner.run_file(
@@ -39,16 +39,16 @@ print("\\nTraining complete!")
                     "learning_rate": 0.001,
                     "epochs": 10,
                     "batch_size": 32,
-                    "model_name": "ResNet50"
-                }
+                    "model_name": "ResNet50",
+                },
             )
-            
+
             print("Script output:")
             print("-" * 40)
             print(result.stdout)
             print("-" * 40)
             print(f"\nExecution successful: {result.success}")
-            
+
         finally:
             # Clean up the temp script
             script_path.unlink()

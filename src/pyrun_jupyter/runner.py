@@ -34,7 +34,7 @@ from .contents import ContentsManager
 from .exceptions import ConnectionError, KernelError
 from .kernel import KernelManager
 from .result import ExecutionResult
-from .websocket import KernelWebSocket
+from .websocket import DEFAULT_BINARY_CHUNK_SIZE, KernelWebSocket
 
 
 class JupyterRunner:
@@ -846,15 +846,24 @@ else:
 
         return downloaded
 
-    def upload_via_kernel(self, local_path: Union[str, Path], remote_path: str) -> bool:
-        """Upload a file via kernel execution (for environments like Kaggle).
+    def upload_via_kernel(
+        self,
+        local_path: Union[str, Path],
+        remote_path: str,
+        chunk_size: int = DEFAULT_BINARY_CHUNK_SIZE,
+        timeout: float = 120.0,
+    ) -> bool:
+        """Stream a file through the kernel WebSocket (for environments like Kaggle).
 
         Some Jupyter environments don't allow direct file uploads via Contents API.
-        This method transfers files by executing Python code in the kernel.
+        This method transfers bounded raw binary chunks through a Jupyter Comm,
+        without base64 expansion or buffering the complete file in memory.
 
         Args:
             local_path: Path to local file to upload
             remote_path: Destination path on server (relative to kernel working dir)
+            chunk_size: Maximum raw binary chunk size in bytes
+            timeout: Maximum time to wait for each remote acknowledgement
 
         Returns:
             True if upload succeeded
@@ -867,33 +876,13 @@ else:
         if not local_path.exists():
             raise FileNotFoundError(f"Local file not found: {local_path}")
 
-        content_bytes = local_path.read_bytes()
-        content_b64 = base64.b64encode(content_bytes).decode("ascii")
-
-        result = self.run(f"""
-import os
-import base64
-
-remote_path = {remote_path!r}
-project_root = globals().get("_PYRUN_JUPYTER_ROOT")
-if project_root is None:
-    project_root = os.getcwd()
-    globals()["_PYRUN_JUPYTER_ROOT"] = project_root
-
-if not os.path.isabs(remote_path):
-    remote_path = os.path.abspath(os.path.join(project_root, remote_path))
-
-remote_dir = os.path.dirname(remote_path)
-if remote_dir:
-    os.makedirs(remote_dir, exist_ok=True)
-
-content = base64.b64decode({content_b64!r})
-with open(remote_path, 'wb') as f:
-    f.write(content)
-print("__UPLOAD_OK__")
-""")
-
-        return "__UPLOAD_OK__" in result.stdout
+        self._ensure_kernel()
+        return self._websocket.upload_file(
+            local_path,
+            remote_path,
+            chunk_size=chunk_size,
+            timeout=timeout,
+        )
 
     def upload_directory_via_kernel(
         self,

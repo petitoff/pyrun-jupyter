@@ -275,15 +275,19 @@ class JupyterRunner:
         self,
         local_path: Union[str, Path],
         remote_path: str,
+        chunk_size: int = 4 * 1024 * 1024,
+        timeout: float = 120.0,
     ) -> bool:
-        """Upload a file via kernel execution (for Kaggle and similar platforms).
+        """Stream a file through the kernel WebSocket.
 
-        This method transfers files by executing Python code in the kernel,
+        This method sends bounded raw binary chunks through a Jupyter Comm,
         bypassing the Contents API which may not be available.
 
         Args:
             local_path: Path to local file
             remote_path: Destination path relative to kernel working directory
+            chunk_size: Maximum raw binary chunk size in bytes
+            timeout: Maximum time to wait for each remote acknowledgement
 
         Returns:
             True if upload succeeded
