@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyrun-jupyter"
-version = "0.6.0"
+version = "0.7.0"
 description = "Run local Python code and projects on remote Jupyter kernels"
 readme = "README.md"
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
