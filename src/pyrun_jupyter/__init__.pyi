@@ -25,6 +25,7 @@ Usage:
 """
 
 from .contents import FileTransferError as FileTransferError
+from .contents import RemoteFileNotFoundError as RemoteFileNotFoundError
 from .exceptions import ConnectionError as ConnectionError
 from .exceptions import ExecutionError as ExecutionError
 from .exceptions import KernelError as KernelError
@@ -41,4 +42,5 @@ __all__ = [
     "JupyterRunner",
     "KernelError",
     "PyrunJupyterError",
+    "RemoteFileNotFoundError",
 ]

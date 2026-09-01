@@ -220,8 +220,9 @@ process are represented in the result instead of being raised.
 | `display_data` | Additional Jupyter display outputs |
 | `execution_count` | Jupyter execution counter |
 
-Connection and kernel-management failures raise subclasses of
-`PyrunJupyterError`:
+Connection, kernel-management, and file-transfer failures raise subclasses of
+`PyrunJupyterError` (`ConnectionError`, `KernelError`, `ExecutionError`,
+`FileTransferError`, and `RemoteFileNotFoundError`):
 
 ```python
 from pyrun_jupyter import JupyterRunner, PyrunJupyterError
@@ -287,11 +288,22 @@ runner.download_kernel_files(
 )
 ```
 
-`upload_via_kernel()` and project synchronization stream raw binary WebSocket
-buffers in 4 MiB chunks. Every chunk is acknowledged by the kernel, the complete
-file is verified with SHA-256, and the destination is replaced atomically only
-after verification. You can tune the chunk size and acknowledgement timeout for
-a particular proxy:
+Both directions use the same transport: raw binary WebSocket buffers in 4 MiB
+chunks, carried over a dedicated Jupyter Comm rather than encoded into source
+code or program output. Neither side ever holds more than a single chunk in
+memory, and no payload is base64-encoded.
+
+- **Upload.** Each chunk is acknowledged by the kernel before the next is sent.
+  The kernel writes to a temporary file, verifies the complete transfer against
+  a SHA-256 sent with the final message, and only then replaces the destination
+  atomically.
+- **Download.** The client pulls one chunk at a time, so the kernel never queues
+  more than a single buffer. Bytes land in a local temporary file, are verified
+  against the size and SHA-256 the kernel reports on completion, and only then
+  replace the destination atomically.
+
+An aborted or failed transfer leaves no partial file on either side. You can
+tune the chunk size and the per-chunk timeout for a particular proxy:
 
 ```python
 runner.upload_via_kernel(
@@ -300,14 +312,30 @@ runner.upload_via_kernel(
     chunk_size=8 * 1024 * 1024,
     timeout=300,
 )
+
+runner.download_kernel_files(
+    ["outputs/large-model.safetensors"],
+    local_dir="./artifacts",
+    chunk_size=8 * 1024 * 1024,
+    timeout=300,
+)
 ```
+
+A file that does not exist on the kernel raises `RemoteFileNotFoundError`, a
+subclass of `FileTransferError`. `download_kernel_files()` catches it per file,
+warns, and continues, so a missing artifact does not abandon the rest of the
+batch.
 
 ## Operational notes
 
-- Kernel uploads use bounded raw binary chunks and do not buffer or base64-encode
-  the complete file. The Jupyter Contents API and `download_kernel_files()` still
-  use base64 as required by their current implementations; downloads therefore
-  remain best suited to moderate-size artifacts.
+- Kernel transfers are binary in both directions: bounded raw chunks, never
+  base64, and never the complete file in memory. This is the path used by
+  `run_project()`, so project synchronization and artifact retrieval both stream.
+- The `upload_file()` / `download_file()` / `upload_directory()` /
+  `download_files()` helpers go through the Jupyter Contents API, whose REST
+  representation for binary content is base64 (`{"format": "base64"}`). That
+  encoding is the API's, not a fallback chosen here, and it does buffer the whole
+  file. Prefer the kernel helpers above for large artifacts.
 - Project dependencies are not synchronized or installed automatically.
 - The default project workspace is recreated for every `run_project()` call.
   Treat a custom `remote_dir` as managed, disposable storage.

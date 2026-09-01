@@ -14,6 +14,10 @@ class FileTransferError(PyrunJupyterError):
     """Raised when file upload/download fails."""
 
 
+class RemoteFileNotFoundError(FileTransferError):
+    """Raised when a requested file does not exist on the remote kernel."""
+
+
 class ContentsManager:
     """Manages file operations on Jupyter server via Contents API.
 
@@ -22,6 +26,13 @@ class ContentsManager:
     - Download files from the server
     - List directory contents
     - Delete files
+
+    Note:
+        Binary content on this REST API is carried as base64 (``{"format":
+        "base64"}``); that encoding is part of the Jupyter Contents API, not a
+        choice made here, and it requires buffering the whole file. Callers
+        moving large artifacts should prefer the kernel transport in
+        :mod:`pyrun_jupyter.websocket`, which streams raw binary chunks.
     """
 
     def __init__(

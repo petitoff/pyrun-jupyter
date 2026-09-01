@@ -24,13 +24,12 @@ Typical usage:
 
 from __future__ import annotations
 
-import base64
 import json
 import posixpath
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from .contents import ContentsManager
+from .contents import ContentsManager, FileTransferError, RemoteFileNotFoundError
 from .exceptions import ConnectionError, KernelError
 from .kernel import KernelManager
 from .result import ExecutionResult
@@ -759,17 +758,28 @@ print(json.dumps(matches))
         local_dir: Union[str, Path],
         working_dir: str = "",
         flatten: bool = True,
+        chunk_size: int = DEFAULT_BINARY_CHUNK_SIZE,
+        timeout: float = 120.0,
     ) -> List[Path]:
         """Download files created by kernel execution (e.g., on Kaggle).
 
         Some Jupyter environments (like Kaggle) store kernel outputs in a different
-        location than the Contents API. This method uses kernel execution to read
-        and transfer files.
+        location than the Contents API. This method streams each file back through
+        the kernel WebSocket as raw binary chunks, without base64 expansion or
+        buffering the complete file in memory. Every file is verified against the
+        kernel's SHA-256 and installed atomically.
+
+        Files that are missing remotely, or that fail to transfer, are reported as
+        warnings and skipped; the returned list contains only the files that
+        arrived intact.
 
         Args:
             remote_paths: List of file paths relative to kernel working directory
             local_dir: Local directory to save files
             working_dir: Working directory on server (kernel's cwd)
+            flatten: If True, save all files directly in local_dir without subdirs
+            chunk_size: Maximum raw binary chunk size in bytes
+            timeout: Maximum time to wait for each remote chunk
 
         Returns:
             List of paths to downloaded files
@@ -786,6 +796,8 @@ print(json.dumps(matches))
         local_dir = Path(local_dir)
         local_dir.mkdir(parents=True, exist_ok=True)
 
+        self._ensure_kernel()
+
         downloaded = []
 
         for filename in remote_paths:
@@ -795,54 +807,21 @@ print(json.dumps(matches))
             else:
                 full_path = filename
 
-            # Use kernel to read file and encode as base64
-            result = self.run(
-                f"""
-import os
-import base64
-
-filepath = {full_path!r}
-project_root = globals().get("_PYRUN_JUPYTER_ROOT")
-if project_root is None:
-    project_root = os.getcwd()
-    globals()["_PYRUN_JUPYTER_ROOT"] = project_root
-
-if not os.path.isabs(filepath):
-    filepath = os.path.abspath(os.path.join(project_root, filepath))
-
-if os.path.exists(filepath):
-    with open(filepath, 'rb') as f:
-        content = base64.b64encode(f.read()).decode('ascii')
-    # Print in chunks to avoid output limits
-    chunk_size = 50000
-    for i in range(0, len(content), chunk_size):
-        print(content[i:i+chunk_size], end='')
-    print()  # Final newline
-    print("__FILE_OK__")
-else:
-    print("__FILE_NOT_FOUND__")
-""",
-                timeout=120.0,
-            )
-
-            output = result.stdout.strip()
-
-            if "__FILE_NOT_FOUND__" in output:
+            try:
+                self._websocket.download_file(
+                    full_path,
+                    local_path,
+                    chunk_size=chunk_size,
+                    timeout=timeout,
+                )
+            except RemoteFileNotFoundError:
                 print(f"Warning: {filename} not found on server")
                 continue
+            except (FileTransferError, OSError) as e:
+                print(f"Warning: Failed to download {filename}: {e}")
+                continue
 
-            if "__FILE_OK__" in output:
-                # Extract base64 content (everything before __FILE_OK__)
-                b64_content = output.replace("__FILE_OK__", "").strip()
-                try:
-                    file_bytes = base64.b64decode(b64_content)
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
-                    local_path.write_bytes(file_bytes)
-                    downloaded.append(local_path)
-                except Exception as e:
-                    print(f"Warning: Failed to decode {filename}: {e}")
-            else:
-                print(f"Warning: Unexpected output for {filename}")
+            downloaded.append(local_path)
 
         return downloaded
 

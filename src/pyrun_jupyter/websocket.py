@@ -6,41 +6,49 @@ import time
 import uuid
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import websocket
 
-from .contents import FileTransferError
+from .contents import FileTransferError, RemoteFileNotFoundError
 from .result import ExecutionResult
 
-BINARY_TRANSFER_TARGET = "pyrun_jupyter.binary_file_transfer.v1"
+BINARY_UPLOAD_TARGET = "pyrun_jupyter.binary_file_transfer.v1"
+BINARY_DOWNLOAD_TARGET = "pyrun_jupyter.binary_file_download.v1"
 BINARY_TRANSFER_READY_MARKER = "__PYRUN_BINARY_TRANSFER_READY__"
 DEFAULT_BINARY_CHUNK_SIZE = 4 * 1024 * 1024
 
-BINARY_TRANSFER_SETUP_CODE = f"""\
+# Installed in the remote kernel once per connection. Both directions move raw
+# bytes through Comm buffers: no base64, and never more than one chunk in memory.
+_BINARY_TRANSFER_HANDLERS = """
 import hashlib as _pyrun_hashlib
 import os as _pyrun_os
 
-def _pyrun_binary_transfer_target(comm, open_msg):
-    data = open_msg.get("content", {{}}).get("data", {{}})
-    remote_path = data.get("path")
-    if not isinstance(remote_path, str) or not remote_path:
-        comm.send({{"status": "error", "error": "A non-empty destination path is required"}})
-        comm.close()
-        return
 
+def _pyrun_resolve_transfer_path(path):
     project_root = globals().get("_PYRUN_JUPYTER_ROOT")
     if project_root is None:
         project_root = _pyrun_os.getcwd()
         globals()["_PYRUN_JUPYTER_ROOT"] = project_root
-    if not _pyrun_os.path.isabs(remote_path):
-        remote_path = _pyrun_os.path.abspath(_pyrun_os.path.join(project_root, remote_path))
+    if not _pyrun_os.path.isabs(path):
+        path = _pyrun_os.path.abspath(_pyrun_os.path.join(project_root, path))
+    return path
 
+
+def _pyrun_binary_upload_target(comm, open_msg):
+    data = open_msg.get("content", {}).get("data", {})
+    remote_path = data.get("path")
+    if not isinstance(remote_path, str) or not remote_path:
+        comm.send({"status": "error", "error": "A non-empty destination path is required"})
+        comm.close()
+        return
+
+    remote_path = _pyrun_resolve_transfer_path(remote_path)
     remote_parent = _pyrun_os.path.dirname(remote_path)
     if remote_parent:
         _pyrun_os.makedirs(remote_parent, exist_ok=True)
     temporary_path = remote_path + ".pyrun-upload-" + data.get("transfer_id", "unknown")
-    state = {{
+    state = {
         "file": None,
         "temporary_path": temporary_path,
         "remote_path": remote_path,
@@ -48,7 +56,7 @@ def _pyrun_binary_transfer_target(comm, open_msg):
         "sequence": 0,
         "sha256": _pyrun_hashlib.sha256(),
         "complete": False,
-    }}
+    }
 
     def cleanup():
         file_object = state.get("file")
@@ -60,13 +68,13 @@ def _pyrun_binary_transfer_target(comm, open_msg):
     try:
         state["file"] = open(temporary_path, "wb")
     except Exception as exc:
-        comm.send({{"status": "error", "error": str(exc)}})
+        comm.send({"status": "error", "error": str(exc)})
         comm.close()
         return
 
     @comm.on_msg
     def receive(message):
-        payload = message.get("content", {{}}).get("data", {{}})
+        payload = message.get("content", {}).get("data", {})
         action = payload.get("action")
         try:
             if action == "chunk":
@@ -81,11 +89,11 @@ def _pyrun_binary_transfer_target(comm, open_msg):
                 state["sha256"].update(chunk)
                 state["size"] += len(chunk)
                 state["sequence"] += 1
-                comm.send({{
+                comm.send({
                     "status": "ack",
                     "sequence": sequence,
                     "written": state["size"],
-                }})
+                })
             elif action == "finish":
                 state["file"].close()
                 expected_size = payload.get("size")
@@ -97,11 +105,11 @@ def _pyrun_binary_transfer_target(comm, open_msg):
                     raise ValueError("Transferred file checksum does not match")
                 _pyrun_os.replace(temporary_path, remote_path)
                 state["complete"] = True
-                comm.send({{
+                comm.send({
                     "status": "complete",
                     "size": state["size"],
                     "sha256": actual_digest,
-                }})
+                })
                 comm.close()
             elif action == "abort":
                 cleanup()
@@ -110,21 +118,116 @@ def _pyrun_binary_transfer_target(comm, open_msg):
                 raise ValueError("Unknown binary transfer action")
         except Exception as exc:
             cleanup()
-            comm.send({{"status": "error", "error": str(exc)}})
+            comm.send({"status": "error", "error": str(exc)})
             comm.close()
 
     @comm.on_close
     def close(_message):
         cleanup()
 
-    comm.send({{"status": "ready"}})
+    comm.send({"status": "ready"})
 
-get_ipython().kernel.comm_manager.register_target(
-    {BINARY_TRANSFER_TARGET!r},
-    _pyrun_binary_transfer_target,
+
+def _pyrun_binary_download_target(comm, open_msg):
+    data = open_msg.get("content", {}).get("data", {})
+    remote_path = data.get("path")
+    if not isinstance(remote_path, str) or not remote_path:
+        comm.send({"status": "error", "error": "A non-empty source path is required"})
+        comm.close()
+        return
+
+    try:
+        chunk_size = int(data.get("chunk_size"))
+    except (TypeError, ValueError):
+        chunk_size = 0
+    if chunk_size <= 0:
+        comm.send({"status": "error", "error": "A positive chunk_size is required"})
+        comm.close()
+        return
+
+    remote_path = _pyrun_resolve_transfer_path(remote_path)
+    if not _pyrun_os.path.isfile(remote_path):
+        comm.send({
+            "status": "error",
+            "code": "not_found",
+            "error": "Remote file not found: " + remote_path,
+        })
+        comm.close()
+        return
+
+    state = {"file": None, "size": 0, "sequence": 0, "sha256": _pyrun_hashlib.sha256()}
+
+    def cleanup():
+        file_object = state.get("file")
+        if file_object is not None and not file_object.closed:
+            file_object.close()
+
+    try:
+        total_size = _pyrun_os.path.getsize(remote_path)
+        state["file"] = open(remote_path, "rb")
+    except Exception as exc:
+        comm.send({"status": "error", "error": str(exc)})
+        comm.close()
+        return
+
+    @comm.on_msg
+    def receive(message):
+        payload = message.get("content", {}).get("data", {})
+        action = payload.get("action")
+        try:
+            if action == "next":
+                sequence = payload.get("sequence")
+                if sequence != state["sequence"]:
+                    raise ValueError("Unexpected chunk request sequence")
+                chunk = state["file"].read(chunk_size)
+                if chunk:
+                    state["sha256"].update(chunk)
+                    state["size"] += len(chunk)
+                    state["sequence"] += 1
+                    comm.send(
+                        {"status": "chunk", "sequence": sequence, "size": len(chunk)},
+                        buffers=[chunk],
+                    )
+                else:
+                    cleanup()
+                    comm.send({
+                        "status": "complete",
+                        "size": state["size"],
+                        "sha256": state["sha256"].hexdigest(),
+                    })
+                    comm.close()
+            elif action == "abort":
+                cleanup()
+                comm.close()
+            else:
+                raise ValueError("Unknown binary download action")
+        except Exception as exc:
+            cleanup()
+            comm.send({"status": "error", "error": str(exc)})
+            comm.close()
+
+    @comm.on_close
+    def close(_message):
+        cleanup()
+
+    comm.send({"status": "ready", "size": total_size})
+"""
+
+BINARY_TRANSFER_SETUP_CODE = (
+    _BINARY_TRANSFER_HANDLERS
+    + f"""
+_pyrun_comm_manager = get_ipython().kernel.comm_manager
+_pyrun_comm_manager.register_target(
+    {BINARY_UPLOAD_TARGET!r},
+    _pyrun_binary_upload_target,
+)
+_pyrun_comm_manager.register_target(
+    {BINARY_DOWNLOAD_TARGET!r},
+    _pyrun_binary_download_target,
 )
 print({BINARY_TRANSFER_READY_MARKER!r})
 """
+)
 
 
 class KernelWebSocket:
@@ -231,23 +334,31 @@ class KernelWebSocket:
         else:
             self.ws.send(json.dumps(message))
 
-    def _wait_for_transfer_status(
-        self, comm_id: str, expected_status: str, timeout: float
-    ) -> Dict[str, Any]:
+    def _wait_for_transfer_payload(
+        self,
+        comm_id: str,
+        expected_statuses: Union[str, Iterable[str]],
+        timeout: float,
+    ) -> Tuple[Dict[str, Any], Sequence[bytes]]:
+        """Wait for a comm reply carrying one of ``expected_statuses``, with its buffers."""
+        if isinstance(expected_statuses, str):
+            expected: Tuple[str, ...] = (expected_statuses,)
+        else:
+            expected = tuple(expected_statuses)
+        wanted = "/".join(expected)
+
         if not self.ws:
             raise FileTransferError("WebSocket connection was not established")
         deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise FileTransferError(f"Binary transfer timed out waiting for {expected_status}")
+                raise FileTransferError(f"Binary transfer timed out waiting for {wanted}")
             self.ws.settimeout(remaining)
             try:
                 reply = self._decode_message(self.ws.recv())
             except websocket.WebSocketTimeoutException as exc:
-                raise FileTransferError(
-                    f"Binary transfer timed out waiting for {expected_status}"
-                ) from exc
+                raise FileTransferError(f"Binary transfer timed out waiting for {wanted}") from exc
             msg_type = reply.get("msg_type") or reply.get("header", {}).get("msg_type")
             content = reply.get("content", {})
             if content.get("comm_id") != comm_id:
@@ -258,9 +369,18 @@ class KernelWebSocket:
                 continue
             data = content.get("data", {})
             if data.get("status") == "error":
-                raise FileTransferError(data.get("error", "Remote binary transfer failed"))
-            if data.get("status") == expected_status:
-                return data
+                message = data.get("error", "Remote binary transfer failed")
+                if data.get("code") == "not_found":
+                    raise RemoteFileNotFoundError(message)
+                raise FileTransferError(message)
+            if data.get("status") in expected:
+                return data, reply.get("buffers", [])
+
+    def _wait_for_transfer_status(
+        self, comm_id: str, expected_status: str, timeout: float
+    ) -> Dict[str, Any]:
+        data, _buffers = self._wait_for_transfer_payload(comm_id, expected_status, timeout)
+        return data
 
     def _ensure_binary_transfer(self, timeout: float) -> None:
         if self._binary_transfer_ready:
@@ -293,7 +413,7 @@ class KernelWebSocket:
             "comm_open",
             {
                 "comm_id": comm_id,
-                "target_name": BINARY_TRANSFER_TARGET,
+                "target_name": BINARY_UPLOAD_TARGET,
                 "data": {"path": remote_path, "transfer_id": comm_id},
             },
         )
@@ -349,6 +469,99 @@ class KernelWebSocket:
                 )
             except Exception:
                 pass
+            raise
+
+    def download_file(
+        self,
+        remote_path: str,
+        local_path: Path,
+        chunk_size: int = DEFAULT_BINARY_CHUNK_SIZE,
+        timeout: float = 120.0,
+    ) -> int:
+        """Stream a remote file back as binary WebSocket buffers.
+
+        The client pulls one chunk at a time, so the kernel never queues more
+        than a single buffer. Bytes land in a sibling temporary file, are
+        verified against the kernel's size and SHA-256, and only then replace
+        the destination.
+
+        Returns:
+            Number of bytes written.
+        """
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero")
+        if not remote_path:
+            raise ValueError("remote_path must not be empty")
+        self._ensure_binary_transfer(timeout)
+
+        local_path = Path(local_path)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+
+        comm_id = str(uuid.uuid4())
+        temporary_path = local_path.with_name(f"{local_path.name}.pyrun-download-{comm_id}")
+        self._send_message(
+            "comm_open",
+            {
+                "comm_id": comm_id,
+                "target_name": BINARY_DOWNLOAD_TARGET,
+                "data": {
+                    "path": remote_path,
+                    "transfer_id": comm_id,
+                    "chunk_size": chunk_size,
+                },
+            },
+        )
+        try:
+            opening = self._wait_for_transfer_status(comm_id, "ready", timeout)
+            announced_size = opening.get("size")
+
+            digest = sha256()
+            received = 0
+            sequence = 0
+            with temporary_path.open("wb") as destination:
+                while True:
+                    self._send_message(
+                        "comm_msg",
+                        {
+                            "comm_id": comm_id,
+                            "data": {"action": "next", "sequence": sequence},
+                        },
+                    )
+                    data, buffers = self._wait_for_transfer_payload(
+                        comm_id, ("chunk", "complete"), timeout
+                    )
+                    if data.get("status") == "complete":
+                        completed = data
+                        break
+                    if data.get("sequence") != sequence:
+                        raise FileTransferError("Kernel returned an unexpected chunk")
+                    if len(buffers) != 1:
+                        raise FileTransferError("Each chunk message must contain one binary buffer")
+                    chunk = bytes(buffers[0])
+                    destination.write(chunk)
+                    digest.update(chunk)
+                    received += len(chunk)
+                    sequence += 1
+
+            if completed.get("size") != received or completed.get("sha256") != digest.hexdigest():
+                raise FileTransferError(f"Downloaded file failed verification: {remote_path}")
+            if announced_size is not None and announced_size != received:
+                raise FileTransferError(
+                    f"Downloaded file is incomplete: {remote_path} "
+                    f"({received} of {announced_size} bytes)"
+                )
+
+            temporary_path.replace(local_path)
+            return received
+        except BaseException:
+            try:
+                self._send_message(
+                    "comm_msg",
+                    {"comm_id": comm_id, "data": {"action": "abort"}},
+                )
+            except Exception:
+                pass
+            temporary_path.unlink(missing_ok=True)
             raise
 
     def execute(self, code: str, timeout: float = 60.0) -> ExecutionResult:

@@ -77,9 +77,10 @@ Exceptions:
     - KernelError: Kernel operation failed
     - ExecutionError: Code execution failed
     - FileTransferError: File upload/download failed
+    - RemoteFileNotFoundError: Requested file is missing on the remote kernel
 """
 
-from .contents import FileTransferError
+from .contents import FileTransferError, RemoteFileNotFoundError
 from .exceptions import (
     ConnectionError,
     ExecutionError,
@@ -98,4 +99,5 @@ __all__ = [
     "JupyterRunner",
     "KernelError",
     "PyrunJupyterError",
+    "RemoteFileNotFoundError",
 ]
