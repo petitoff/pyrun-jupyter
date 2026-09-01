@@ -5,7 +5,7 @@ It contains all output and error information from code execution.
 
 Key Attributes:
     stdout: str - Standard output text
-    stderr: str - Standard error text  
+    stderr: str - Standard error text
     success: bool - True if no errors occurred
     has_error: bool - True if errors occurred (opposite of success)
     error: str | None - Error message if failed
@@ -17,13 +17,13 @@ Key Attributes:
 
 Example:
     result = runner.run("print('hello'); x = 1/0")
-    
+
     if result.has_error:
         print(f"Failed: {result.error_name}: {result.error}")
         # Failed: ZeroDivisionError: division by zero
     else:
         print(result.stdout)
-    
+
     # Access rich output
     if result.html:
         display_html(result.html)
@@ -32,35 +32,34 @@ Example:
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-
 @dataclass
 class ExecutionResult:
     """Result of code execution on remote Jupyter kernel."""
-    
+
     # Output streams
     stdout: str
     """Standard output from print() and similar."""
-    
+
     stderr: str
     """Standard error output."""
-    
+
     # Execution status
     success: bool
     """True if execution completed without errors."""
-    
+
     execution_count: Optional[int]
     """Jupyter cell execution counter (e.g., In[5] -> 5)."""
-    
+
     # Error information (only if success=False)
     error: Optional[str]
     """Error message if execution failed."""
-    
+
     error_name: Optional[str]
     """Exception class name (e.g., 'ValueError', 'TypeError')."""
-    
+
     error_traceback: List[str]
     """Full traceback as list of strings."""
-    
+
     # Rich output data
     data: Dict[str, Any]
     """Rich output dict with mime types as keys.
@@ -71,24 +70,32 @@ class ExecutionResult:
         - 'image/png': Base64-encoded PNG image
         - 'application/json': JSON data
     """
-    
+
     display_data: List[Dict[str, Any]]
     """Additional display outputs from display() calls."""
-    
+
+    def __init__(
+        self,
+        stdout: str = "",
+        stderr: str = "",
+        success: bool = True,
+        execution_count: Optional[int] = None,
+        error: Optional[str] = None,
+        error_name: Optional[str] = None,
+        error_traceback: Optional[List[str]] = None,
+        data: Optional[Dict[str, Any]] = None,
+        display_data: Optional[List[Dict[str, Any]]] = None,
+    ) -> None: ...
+
     # Convenience properties
     @property
     def text(self) -> str:
         """Get plain text result from data['text/plain']."""
-        ...
-    
+
     @property
     def html(self) -> Optional[str]:
         """Get HTML result from data['text/html'] if available."""
-        ...
-    
+
     @property
     def has_error(self) -> bool:
         """Check if execution resulted in an error (opposite of success)."""
-        ...
-    
-    def __str__(self) -> str: ...

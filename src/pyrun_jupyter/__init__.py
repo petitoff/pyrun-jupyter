@@ -5,13 +5,13 @@ This library provides JupyterRunner for remote code execution with file transfer
 
 Main Class:
     JupyterRunner - Connect to Jupyter server and execute code/files
-    
+
     Key Methods:
         Code Execution:
             - run(code: str) -> ExecutionResult
             - run_file(path, params) -> ExecutionResult
             - run_project(project_dir, entrypoint, artifact_paths) -> ExecutionResult
-        
+
         File Transfer (Contents API):
             - upload_file(local, remote)
             - upload_directory(local_dir, remote_dir)
@@ -20,12 +20,12 @@ Main Class:
             - list_files(path) -> list[dict]
             - file_exists(path) -> bool
             - delete_file(path)
-        
+
         File Transfer (Kernel-based, for Kaggle etc.):
             - upload_via_kernel(local, remote) -> bool
             - upload_directory_via_kernel(local_dir, remote_dir) -> list[str]
             - download_kernel_files(paths, local_dir, working_dir) -> list[Path]
-        
+
         Kernel Management:
             - start_kernel(name) -> str
             - stop_kernel()
@@ -55,10 +55,10 @@ Basic Usage:
     with JupyterRunner(kaggle_url) as runner:
         # Upload project
         runner.upload_directory_via_kernel("./src", "project")
-        
+
         # Run code
         runner.run("import os; os.chdir('project'); exec(open('train.py').read())")
-        
+
         # Download results
         runner.download_kernel_files(["model.pth"], "./output", "project")
 
@@ -79,23 +79,23 @@ Exceptions:
     - FileTransferError: File upload/download failed
 """
 
-from .runner import JupyterRunner
-from .result import ExecutionResult
 from .contents import FileTransferError
 from .exceptions import (
-    PyrunJupyterError,
     ConnectionError,
-    KernelError,
     ExecutionError,
+    KernelError,
+    PyrunJupyterError,
 )
+from .result import ExecutionResult
+from .runner import JupyterRunner
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 __all__ = [
-    "JupyterRunner",
-    "ExecutionResult",
-    "PyrunJupyterError",
     "ConnectionError",
-    "KernelError",
     "ExecutionError",
+    "ExecutionResult",
     "FileTransferError",
+    "JupyterRunner",
+    "KernelError",
+    "PyrunJupyterError",
 ]

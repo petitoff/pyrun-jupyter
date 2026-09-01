@@ -1,22 +1,22 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyrun-jupyter"
-version = "0.5.1"
-description = "Execute Python .py files on remote Jupyter servers"
+version = "0.6.0"
+description = "Run local Python code and projects on remote Jupyter kernels"
 readme = "README.md"
-license = {text = "MIT"}
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.8"
 authors = [
     {name = "Blazej Domagala"}
 ]
-keywords = ["jupyter", "remote", "execution", "kernel", "python"]
+keywords = ["jupyter", "remote", "execution", "kernel", "python", "gpu", "kaggle"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -33,8 +33,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.2.2",
+    "mypy>=1.8.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "ruff>=0.8.0",
+    "twine>=5.1.0",
+    "types-requests>=2.31.0",
 ]
 
 [project.urls]
@@ -47,3 +52,19 @@ pyrun-jupyter = "pyrun_jupyter.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+pyrun_jupyter = ["py.typed", "*.pyi"]
+
+[tool.uv]
+required-version = ">=0.12.0,<0.13.0"
+
+[tool.ruff]
+target-version = "py38"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"*.pyi" = ["F401"]

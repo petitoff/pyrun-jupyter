@@ -1,332 +1,339 @@
 # pyrun-jupyter
 
-Execute Python projects and `.py` files on remote Jupyter servers.
+Run local Python code and projects on a remote Jupyter kernel, then bring the
+results back to your machine.
 
-[![PyPI version](https://img.shields.io/pypi/v/pyrun-jupyter)](https://pypi.org/project/pyrun-jupyter/)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub](https://img.shields.io/badge/GitHub-petitoff%2Fpyrun--jupyter-blue)](https://github.com/petitoff/pyrun-jupyter)
+[![PyPI](https://img.shields.io/pypi/v/pyrun-jupyter)](https://pypi.org/project/pyrun-jupyter/)
+[![Tests](https://github.com/petitoff/pyrun-jupyter/actions/workflows/test.yml/badge.svg)](https://github.com/petitoff/pyrun-jupyter/actions/workflows/test.yml)
+[![Python](https://img.shields.io/pypi/pyversions/pyrun-jupyter)](https://pypi.org/project/pyrun-jupyter/)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange.svg)](LICENSE)
+
+`pyrun-jupyter` is useful when your code lives locally but the compute is
+attached to a Jupyter server—for example, a machine with an NVIDIA GPU. It can:
+
+- execute Python source code or a local `.py` file;
+- synchronize a multi-file project and run one of its entrypoints;
+- inject JSON-compatible parameters into the executed program;
+- collect stdout, stderr, rich Jupyter output, and tracebacks;
+- download selected artifacts such as checkpoints, plots, or metrics;
+- start, connect to, restart, and stop Jupyter kernels;
+- be used as either a Python library or a CLI.
+
+> [!IMPORTANT]
+> This package is a Jupyter client, not a GPU or Kaggle provisioner. The target
+> must expose a reachable, Jupyter Server-compatible HTTP and WebSocket API.
+> Enabling a Kaggle accelerator, authenticating to Kaggle, and exposing a
+> reachable endpoint are outside this package. A Kaggle notebook page URL alone
+> is not necessarily a usable Jupyter API endpoint.
+
+## Requirements
+
+- Python 3.8 or newer on the client;
+- a reachable Jupyter Server, JupyterLab, or compatible deployment;
+- permission to use `/api/kernels` and kernel WebSocket channels;
+- third-party dependencies required by your program already installed in the
+  remote kernel environment.
+
+GPU acceleration is provided by the remote environment. `pyrun-jupyter` does
+not install CUDA, PyTorch, TensorFlow, drivers, or model dependencies.
 
 ## Installation
 
+For use as a library:
+
 ```bash
-pip install pyrun-jupyter
+uv add pyrun-jupyter
 ```
 
-## Quick Start
+or:
 
-```python
-from pyrun_jupyter import JupyterRunner
-
-# Kaggle-style workflow: sync a local project, run an entrypoint, download artifacts
-with JupyterRunner("http://localhost:8888", token="your_token") as runner:
-    result = runner.run_project(
-        "./my_project",
-        "train.py",
-        artifact_paths=["outputs/*.pth", "outputs/metrics.json"],
-        local_artifact_dir="./artifacts",
-    )
-    print(result.stdout)
-    print(result.data["artifacts"])
+```bash
+python -m pip install pyrun-jupyter
 ```
 
-## Features
+For an isolated CLI installation:
 
-- 🐍 Execute whole local Python projects on remote Jupyter kernels
-- 📁 Sync a project directory so imports across files keep working
-- 🎯 Run a chosen project entrypoint from the synced remote workspace
-- 📤 Pass parameters to your scripts
-- 📦 Download training artifacts such as models, plots, and metrics
-- 📥 Capture stdout, stderr, and rich outputs
-- 🔄 Kernel management (start, stop, restart)
-- 🔌 Connect to existing kernels
-- ⚡ Context manager support for automatic cleanup
+```bash
+uv tool install pyrun-jupyter
+pyrun-jupyter --help
+```
 
-## Usage Examples
+## Quick start
 
-### Project Workflow for Kaggle and Other Remote Kernels
+Set connection details once. Supplying the token through the environment keeps
+it out of command history and process arguments.
 
-This is the recommended workflow for normal `.py` projects. `run_project()` uploads a local
-directory, runs the selected entrypoint inside that synced directory, keeps relative imports
-working, and downloads requested artifacts afterward.
+```bash
+export PYRUN_JUPYTER_URL="https://jupyter.example.com"
+export PYRUN_JUPYTER_TOKEN="your-secret-token"
+```
+
+Run a local project remotely and download its outputs:
+
+```bash
+pyrun-jupyter run-project ./trainer train.py \
+  --params '{"epochs": 10, "learning_rate": 0.001}' \
+  --timeout 7200 \
+  --artifact 'outputs/*.safetensors' \
+  --artifact 'outputs/metrics.json' \
+  --artifact-dir ./artifacts
+```
+
+The equivalent library API is:
 
 ```python
+import os
+
 from pyrun_jupyter import JupyterRunner
 
-with JupyterRunner("http://kaggle-jupyter-server", token="xxx") as runner:
+
+with JupyterRunner(
+    os.environ["PYRUN_JUPYTER_URL"],
+    token=os.environ.get("PYRUN_JUPYTER_TOKEN"),
+) as runner:
     result = runner.run_project(
         "./trainer",
         "train.py",
-        params={
-            "epochs": 10,
-            "learning_rate": 0.001,
-        },
+        params={"epochs": 10, "learning_rate": 0.001},
+        timeout=7200,
         artifact_paths=[
-            "outputs/*.pth",
+            "outputs/*.safetensors",
             "outputs/metrics.json",
         ],
-        local_artifact_dir="./results",
+        local_artifact_dir="./artifacts",
     )
 
+if result.has_error:
+    print(f"{result.error_name}: {result.error}")
+else:
     print(result.stdout)
     print(result.data["artifacts"])
 ```
 
-Example project layout:
+## Running a project
+
+`run_project()` is the recommended interface for normal Python projects. It
+uploads the directory to a clean remote workspace, adds that workspace to
+`sys.path`, changes the remote working directory, executes the entrypoint as
+`__main__`, and optionally downloads artifacts.
 
 ```text
 trainer/
 ├── train.py
 ├── model.py
-├── utils/
-│   └── data.py
+├── pyproject.toml
 └── outputs/
 ```
 
-If `train.py` imports `model.py` or modules under `utils/`, those imports continue to work
-after the project directory is synced to the remote kernel.
-
-### Basic Usage
-
-```python
-from pyrun_jupyter import JupyterRunner
-
-runner = JupyterRunner("http://jupyter-server:8888", token="xxx")
-
-# Execute code
-result = runner.run("x = 42; print(f'The answer is {x}')")
-print(result.stdout)  # The answer is 42
-
-# Clean up
-runner.stop_kernel()
-```
-
-### Using Context Manager (Recommended)
-
-```python
-from pyrun_jupyter import JupyterRunner
-
-with JupyterRunner("http://localhost:8888", token="xxx") as runner:
-    result = runner.run_file("my_script.py")
-    print(result.stdout)
-# Kernel automatically stopped
-```
-
-### Passing Parameters to Scripts
-
-```python
-from pyrun_jupyter import JupyterRunner
-
-with JupyterRunner("http://localhost:8888", token="xxx") as runner:
-    # Parameters are injected as variables in your script
-    result = runner.run_file(
-        "train_model.py",
-        params={
-            "learning_rate": 0.001,
-            "epochs": 100,
-            "batch_size": 32,
-        }
-    )
-    print(result.stdout)
-```
-
-Your `train_model.py` can use these variables directly:
-
-```python
-# train_model.py
-print(f"Training with lr={learning_rate}, epochs={epochs}")
-# ... your training code
-```
-
-You can also pass parameters to a project entrypoint:
-
-```python
-with JupyterRunner("http://localhost:8888", token="xxx") as runner:
-    result = runner.run_project(
-        "./trainer",
-        "train.py",
-        params={"epochs": 50, "batch_size": 32},
-    )
-```
-
-### Handling Errors
-
-```python
-from pyrun_jupyter import JupyterRunner, ExecutionError
-
-runner = JupyterRunner("http://localhost:8888", token="xxx")
-
-result = runner.run("1/0")
-if result.has_error:
-    print(f"Error: {result.error_name}: {result.error}")
-    # Error: ZeroDivisionError: division by zero
-```
-
-### Connecting to Existing Kernel
-
-```python
-runner = JupyterRunner("http://localhost:8888", token="xxx", auto_start_kernel=False)
-
-# List available kernels
-kernels = runner.list_kernels()
-print(kernels)
-
-# Connect to a specific kernel
-runner.connect_to_kernel("existing-kernel-id")
-result = runner.run("print('Using existing kernel!')")
-```
-
-### Managing Kernels
-
-```python
-runner = JupyterRunner("http://localhost:8888", token="xxx")
-
-# Start a specific kernel type
-runner.start_kernel("python3")
-
-# Restart kernel (clears state)
-runner.restart_kernel()
-
-# Stop kernel when done
-runner.stop_kernel()
-```
-
-## CLI
-
-### Project-Oriented Command
+Imports such as `from model import Model` continue to work after synchronization.
+The default exclusions include `.git`, virtual environments, Python caches,
+test caches, and `*.egg-info` directories. Add project-specific exclusions from
+the CLI by repeating `--exclude`:
 
 ```bash
 pyrun-jupyter run-project ./trainer train.py \
-  --url http://localhost:8888 \
-  --token xxx \
-  --artifact "outputs/*.pth" \
-  --artifact "outputs/metrics.json" \
-  --artifact-dir ./results \
-  --exclude .git \
-  --exclude __pycache__
+  --exclude data \
+  --exclude '*.ckpt' \
+  --artifact 'outputs/**/best.ckpt'
 ```
 
-### Low-Level Commands
+Artifact paths may be exact paths or recursive glob patterns relative to the
+remote project root. Their directory structure is preserved under
+`--artifact-dir`.
+
+### Parameters
+
+CLI parameters can be JSON or comma-separated `key=value` pairs:
 
 ```bash
-pyrun-jupyter run-file script.py --url http://localhost:8888 --token xxx
-pyrun-jupyter run "print('hello')" --url http://localhost:8888 --token xxx
+pyrun-jupyter run-project ./trainer train.py --params '{"epochs": 20, "amp": true}'
+pyrun-jupyter run-project ./trainer train.py --params 'epochs=20,amp=true'
 ```
 
-## ExecutionResult
-
-The `run()`, `run_file()`, and `run_project()` methods return an `ExecutionResult` object:
-
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `stdout` | str | Standard output |
-| `stderr` | str | Standard error |
-| `success` | bool | Whether execution succeeded |
-| `error` | str | Error message (if failed) |
-| `error_name` | str | Exception type (e.g., 'ValueError') |
-| `error_traceback` | list | Full traceback |
-| `data` | dict | Rich output (text/plain, text/html, etc.) |
-| `execution_count` | int | Jupyter cell execution count |
-
-When using `run_project()`, downloaded local artifact paths are stored in
-`result.data["artifacts"]`.
-
-## File Transfer
-
-### Upload/Download via Contents API
+They are available as globals in the entrypoint:
 
 ```python
-with JupyterRunner("http://localhost:8888", token="xxx") as runner:
-    # Upload single file
-    runner.upload_file("local_data.csv", "data/input.csv")
-    
-    # Upload entire directory
-    runner.upload_directory(
-        "./my_project",
-        remote_dir="project",
-        pattern="**/*.py",
-        exclude_patterns=["__pycache__", "*.pyc"]
-    )
-    
-    # Download file
-    runner.download_file("output/model.pt", "./local/model.pt")
-    
-    # Download multiple files
-    runner.download_files(
-        ["output/model.pt", "output/metrics.json"],
-        local_dir="./results"
-    )
+# train.py
+print(f"Training for {epochs} epochs; mixed precision: {amp}")
 ```
 
-### Upload/Download via Kernel (for Kaggle, etc.)
+For complex nested values, prefer JSON.
 
-Some environments (like Kaggle) don't support the Contents API. Use kernel-based methods:
-
-```python
-with JupyterRunner(kaggle_url) as runner:
-    result = runner.run_project(
-        "./my_project",
-        "train.py",
-        artifact_paths=["outputs/*.pth", "outputs/*.png"],
-        local_artifact_dir="./results",
-    )
-```
-
-For advanced workflows, the lower-level helpers are still available:
-
-```python
-with JupyterRunner(kaggle_url) as runner:
-    runner.upload_directory_via_kernel("./my_project", remote_dir="project")
-    runner.run("import os; os.chdir('project'); exec(open('train.py').read())")
-    runner.download_kernel_files(
-        ["outputs/model.pth", "outputs/results.png"],
-        local_dir="./results",
-        working_dir="project",
-        flatten=False,
-    )
-```
-
-## Notes for Kaggle Workflows
-
-- `run_project()` is the recommended API for Kaggle-oriented development with normal `.py` files.
-- The package syncs project files, not Python package dependencies. Third-party libraries are
-  expected to already be installed in the remote environment.
-- Each `run_project()` call prepares a fresh remote project directory by default, so stale files
-  from previous runs do not affect the next execution.
-- Artifact paths can be exact file paths or glob patterns relative to the remote project root.
-
-## Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `url` | (required) | Jupyter server URL |
-| `token` | None | Authentication token |
-| `kernel_name` | "python3" | Kernel specification to use |
-| `auto_start_kernel` | True | Start kernel automatically on first run |
-| `reuse_kernel` | True | Reuse existing kernel if available |
-
-## Getting Your Jupyter Token
-
-### From Jupyter Notebook/Lab
-
-When you start Jupyter, it displays a URL with the token:
-```
-http://localhost:8888/?token=abc123...
-```
-
-### Generate a permanent token
+## Running code and individual files
 
 ```bash
-jupyter server --generate-config
-# Edit ~/.jupyter/jupyter_server_config.py
-# Set: c.ServerApp.token = 'your-secret-token'
+pyrun-jupyter run "import torch; print(torch.cuda.is_available())" --timeout 120
+pyrun-jupyter run-file ./scripts/evaluate.py --params '{"split": "test"}' --timeout 1800
 ```
 
-## Requirements
+```python
+from pyrun_jupyter import JupyterRunner
 
-- Python >= 3.8
-- A running Jupyter server (Notebook, Lab, or Hub)
+
+with JupyterRunner("https://jupyter.example.com", token="...") as runner:
+    result = runner.run("print(6 * 7)")
+    print(result.stdout)
+
+    evaluation = runner.run_file(
+        "./scripts/evaluate.py",
+        params={"split": "test"},
+        timeout=1800,
+    )
+```
+
+Use `run_project()` instead of `run_file()` when the entrypoint imports other
+local modules or relies on local files and relative paths.
+
+## CLI reference
+
+```text
+pyrun-jupyter run CODE [connection options]
+pyrun-jupyter run-file FILE [--params PARAMS] [connection options]
+pyrun-jupyter run-project PROJECT_DIR ENTRYPOINT [project options] [connection options]
+```
+
+Common connection options:
+
+| Option | Environment variable | Default |
+| --- | --- | --- |
+| `--url` | `PYRUN_JUPYTER_URL` | required |
+| `--token` | `PYRUN_JUPYTER_TOKEN` | none |
+| `--kernel` | — | `python3` |
+| `--timeout` | — | `60` seconds |
+
+Run `pyrun-jupyter COMMAND --help` for the complete list of command-specific
+options. Commands exit with status `0` on successful remote execution and `1`
+on connection, validation, timeout, or execution failure.
+
+## Execution results and errors
+
+Library calls return an `ExecutionResult`; errors reported by the remote Python
+process are represented in the result instead of being raised.
+
+| Attribute | Description |
+| --- | --- |
+| `success` / `has_error` | Remote execution status |
+| `stdout` / `stderr` | Captured stream output |
+| `error_name` / `error` | Remote exception type and message |
+| `error_traceback` | Remote traceback lines |
+| `data` | Rich `execute_result` output and downloaded artifact paths |
+| `display_data` | Additional Jupyter display outputs |
+| `execution_count` | Jupyter execution counter |
+
+Connection and kernel-management failures raise subclasses of
+`PyrunJupyterError`:
+
+```python
+from pyrun_jupyter import JupyterRunner, PyrunJupyterError
+
+
+try:
+    with JupyterRunner("https://jupyter.example.com", token="...") as runner:
+        result = runner.run("1 / 0")
+except PyrunJupyterError as exc:
+    print(f"Jupyter connection failed: {exc}")
+else:
+    if result.has_error:
+        print("\n".join(result.error_traceback))
+```
+
+## Kernel lifecycle
+
+The context manager starts a kernel and stops it when the block exits:
+
+```python
+with JupyterRunner("https://jupyter.example.com", token="...") as runner:
+    print(runner.kernel_id)
+    runner.restart_kernel()
+```
+
+To connect to a kernel explicitly:
+
+```python
+runner = JupyterRunner(
+    "https://jupyter.example.com",
+    token="...",
+    auto_start_kernel=False,
+)
+runner.connect_to_kernel("existing-kernel-id")
+result = runner.run("print('connected')")
+runner.stop_kernel()
+```
+
+`stop_kernel()` terminates the remote kernel, not only the client connection.
+
+## Lower-level file transfer
+
+The public API also exposes Jupyter Contents API helpers:
+
+```python
+runner.upload_file("./data.csv", "data/input.csv")
+runner.upload_directory("./src", "project/src", pattern="**/*.py")
+runner.download_file("outputs/model.pt", "./artifacts/model.pt")
+runner.download_files(["outputs/model.pt", "outputs/metrics.json"], "./artifacts")
+```
+
+Kernel-based helpers are available when the Contents API does not map to the
+kernel filesystem:
+
+```python
+runner.upload_directory_via_kernel("./src", "project/src")
+runner.download_kernel_files(
+    ["model.pt", "metrics.json"],
+    local_dir="./artifacts",
+    working_dir="project/outputs",
+    flatten=False,
+)
+```
+
+## Operational notes
+
+- File transfer is currently base64-based and buffers complete files in memory.
+  It is suitable for source trees and moderate artifacts, not multi-gigabyte
+  datasets or checkpoints.
+- Project dependencies are not synchronized or installed automatically.
+- The default project workspace is recreated for every `run_project()` call.
+  Treat a custom `remote_dir` as managed, disposable storage.
+- On timeout, the client stops waiting and sends a best-effort interrupt to the
+  kernel. Remote termination is not guaranteed by every Jupyter deployment.
+- A single `JupyterRunner` instance is intended for sequential execution.
+- Use HTTPS/WSS for remote servers and give tokens only the permissions needed
+  for kernel and file operations.
+
+## Development
+
+The repository uses [`uv`](https://docs.astral.sh/uv/) and commits `uv.lock` for
+repeatable development and CI environments.
+
+```bash
+git clone https://github.com/petitoff/pyrun-jupyter.git
+cd pyrun-jupyter
+uv sync --extra dev --locked
+
+uv run pytest
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy src/pyrun_jupyter --ignore-missing-imports
+uv build
+uv run twine check dist/*
+```
+
+When dependencies change, update the lockfile with `uv lock` and commit it with
+`pyproject.toml`.
+
+## Release status
+
+The package is currently classified as **Alpha**. Before relying on it for
+unattended or high-value workloads, test it against the exact Jupyter deployment,
+proxy, authentication method, artifact sizes, and expected runtime you use.
 
 ## License
 
-MIT
+Source code distributed with this release is available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial, academic, and
+educational use is permitted under its terms. Commercial use requires a separate
+written license from the copyright holder.
+
+This is a source-available license, not an OSI-approved open-source license.
+Earlier copies received under the MIT License remain governed by the license
+that accompanied those copies.

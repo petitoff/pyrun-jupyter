@@ -1,118 +1,125 @@
 """Tests for JupyterRunner."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
-import tempfile
 import json
+import tempfile
+from pathlib import Path
+from unittest.mock import Mock, patch
 
-from pyrun_jupyter.runner import JupyterRunner
+import pytest
+
 from pyrun_jupyter.result import ExecutionResult
+from pyrun_jupyter.runner import JupyterRunner
 
 
 class TestJupyterRunner:
     """Test JupyterRunner class."""
-    
-    @patch.object(JupyterRunner, '_validate_connection')
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_initialization(self, mock_validate):
         """Test runner initialization."""
-        runner = JupyterRunner(
-            "http://localhost:8888",
-            token="test_token",
-            kernel_name="python3"
-        )
-        
+        runner = JupyterRunner("http://localhost:8888", token="test_token", kernel_name="python3")
+
         assert runner.url == "http://localhost:8888"
         assert runner.token == "test_token"
         assert runner.kernel_name == "python3"
         assert not runner.is_connected
-    
-    @patch.object(JupyterRunner, '_validate_connection')
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_url_trailing_slash_removed(self, mock_validate):
         """Test that trailing slash is removed from URL."""
         runner = JupyterRunner("http://localhost:8888/", token="xxx")
         assert runner.url == "http://localhost:8888"
-    
-    @patch.object(JupyterRunner, '_validate_connection')
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_generate_params_code(self, mock_validate):
         """Test parameter code generation."""
         runner = JupyterRunner("http://localhost:8888")
-        
-        params = {
-            "learning_rate": 0.001,
-            "epochs": 100,
-            "model_name": "resnet50",
-            "use_cuda": True
-        }
-        
+
+        params = {"learning_rate": 0.001, "epochs": 100, "model_name": "resnet50", "use_cuda": True}
+
         code = runner._generate_params_code(params)
-        
+
         assert "learning_rate = 0.001" in code
         assert "epochs = 100" in code
         assert "model_name = 'resnet50'" in code
         assert "use_cuda = True" in code
-    
-    @patch.object(JupyterRunner, '_validate_connection')
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_run_file_not_found(self, mock_validate):
         """Test FileNotFoundError for missing file."""
         runner = JupyterRunner("http://localhost:8888")
-        
+
         with pytest.raises(FileNotFoundError):
             runner.run_file("nonexistent_file.py")
-    
-    @patch.object(JupyterRunner, '_validate_connection')
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_run_file_wrong_extension(self, mock_validate):
         """Test ValueError for non-.py file."""
         runner = JupyterRunner("http://localhost:8888")
-        
+
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             f.write(b"print('hello')")
             temp_path = f.name
-        
+
         try:
             with pytest.raises(ValueError, match=r"Expected .py file"):
                 runner.run_file(temp_path)
         finally:
             Path(temp_path).unlink()
-    
-    @patch.object(JupyterRunner, '_validate_connection')
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_run_file_with_params(self, mock_validate):
         """Test running file with parameters."""
         runner = JupyterRunner("http://localhost:8888", auto_start_kernel=False)
         runner._kernel_id = "test-kernel-id"  # Simulate connected state
         runner._websocket = Mock()
         runner._websocket.execute.return_value = ExecutionResult(stdout="OK")
-        
+
         with tempfile.NamedTemporaryFile(
-            suffix=".py", 
-            delete=False, 
-            mode='w',
-            encoding='utf-8'
+            suffix=".py", delete=False, mode="w", encoding="utf-8"
         ) as f:
             f.write("print(f'LR: {lr}')")
             temp_path = f.name
-        
+
         try:
-            result = runner.run_file(temp_path, params={"lr": 0.01})
-            
+            runner.run_file(temp_path, params={"lr": 0.01})
+
             # Check that execute was called with injected params
             call_args = runner._websocket.execute.call_args[0][0]
             assert "lr = 0.01" in call_args
             assert "print(f'LR: {lr}')" in call_args
         finally:
             Path(temp_path).unlink()
-    
-    @patch.object(JupyterRunner, '_validate_connection')
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_repr(self, mock_validate):
         """Test string representation."""
         runner = JupyterRunner("http://localhost:8888")
         repr_str = repr(runner)
-        
+
         assert "JupyterRunner" in repr_str
         assert "localhost:8888" in repr_str
         assert "disconnected" in repr_str
 
-    @patch.object(JupyterRunner, '_validate_connection')
+    @patch.object(JupyterRunner, "_validate_connection")
+    def test_run_interrupts_kernel_after_timeout(self, mock_validate):
+        """A client-side timeout should trigger a best-effort remote interrupt."""
+        runner = JupyterRunner("http://localhost:8888", auto_start_kernel=False)
+        runner._kernel_id = "test-kernel-id"
+        runner._websocket = Mock()
+        runner._websocket.execute.return_value = ExecutionResult(
+            success=False,
+            error="Execution timed out",
+            error_name="TimeoutError",
+        )
+        runner._kernel_manager.interrupt_kernel = Mock()
+
+        result = runner.run("while True: pass", timeout=0.01)
+
+        assert result.error_name == "TimeoutError"
+        runner._kernel_manager.interrupt_kernel.assert_called_once_with("test-kernel-id")
+
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_build_project_run_code_serializes_params_as_dict(self, mock_validate):
         """Project execution code should deserialize params into a dict, not a JSON string."""
         runner = JupyterRunner("http://localhost:8888")
@@ -124,10 +131,10 @@ class TestJupyterRunner:
         )
 
         assert 'project_root = globals().get("_PYRUN_JUPYTER_ROOT")' in code
-        assert 'project_dir = os.path.abspath(os.path.join(project_root, project_dir))' in code
-        assert 'params = json.loads(\'{"epochs": 3}\')' in code
+        assert "project_dir = os.path.abspath(os.path.join(project_root, project_dir))" in code
+        assert "params = json.loads('{\"epochs\": 3}')" in code
 
-    @patch.object(JupyterRunner, '_validate_connection')
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_normalize_entrypoint_rejects_path_outside_project(self, mock_validate):
         """Entrypoint must stay inside the synced project directory."""
         runner = JupyterRunner("http://localhost:8888")
@@ -142,11 +149,29 @@ class TestJupyterRunner:
                 if external_path.exists():
                     external_path.unlink()
 
-    @patch.object(JupyterRunner, '_validate_connection')
-    @patch.object(JupyterRunner, 'download_kernel_files')
-    @patch.object(JupyterRunner, '_resolve_kernel_artifacts')
-    @patch.object(JupyterRunner, '_sync_project_via_kernel')
-    @patch.object(JupyterRunner, '_prepare_remote_project_dir')
+    @patch.object(JupyterRunner, "_validate_connection")
+    @pytest.mark.parametrize("remote_dir", ["", ".", "../shared", "/tmp/project"])
+    def test_managed_remote_dir_rejects_unsafe_paths(self, mock_validate, remote_dir):
+        """A project sync must never recursively replace an arbitrary remote directory."""
+        runner = JupyterRunner("http://localhost:8888")
+
+        with pytest.raises(ValueError, match="remote_dir"):
+            runner._validate_managed_remote_dir(remote_dir)
+
+    @patch.object(JupyterRunner, "_validate_connection")
+    @pytest.mark.parametrize("pattern", ["../secret.txt", "/etc/passwd", ""])
+    def test_project_artifacts_must_stay_inside_project(self, mock_validate, pattern):
+        """Project artifact globs must be relative to the managed workspace."""
+        runner = JupyterRunner("http://localhost:8888")
+
+        with pytest.raises(ValueError, match="Artifact pattern"):
+            runner._validate_artifact_patterns([pattern])
+
+    @patch.object(JupyterRunner, "_validate_connection")
+    @patch.object(JupyterRunner, "download_kernel_files")
+    @patch.object(JupyterRunner, "_resolve_kernel_artifacts")
+    @patch.object(JupyterRunner, "_sync_project_via_kernel")
+    @patch.object(JupyterRunner, "_prepare_remote_project_dir")
     def test_run_project_syncs_executes_and_downloads_artifacts(
         self,
         mock_prepare,
@@ -196,11 +221,11 @@ class TestJupyterRunner:
         )
         assert result.data["artifacts"] == [str(downloaded_artifact)]
 
-    @patch.object(JupyterRunner, '_validate_connection')
-    @patch.object(JupyterRunner, 'download_kernel_files')
-    @patch.object(JupyterRunner, '_resolve_kernel_artifacts')
-    @patch.object(JupyterRunner, '_sync_project_via_kernel')
-    @patch.object(JupyterRunner, '_prepare_remote_project_dir')
+    @patch.object(JupyterRunner, "_validate_connection")
+    @patch.object(JupyterRunner, "download_kernel_files")
+    @patch.object(JupyterRunner, "_resolve_kernel_artifacts")
+    @patch.object(JupyterRunner, "_sync_project_via_kernel")
+    @patch.object(JupyterRunner, "_prepare_remote_project_dir")
     def test_run_project_attempts_artifact_download_after_failure(
         self,
         mock_prepare,
@@ -236,7 +261,7 @@ class TestJupyterRunner:
         assert result.has_error
         mock_download_artifacts.assert_called_once()
 
-    @patch.object(JupyterRunner, '_validate_connection')
+    @patch.object(JupyterRunner, "_validate_connection")
     def test_resolve_kernel_artifacts_supports_globs(self, mock_validate):
         """Artifact resolution should parse JSON metadata returned by the kernel."""
         runner = JupyterRunner("http://localhost:8888", auto_start_kernel=False)
@@ -259,13 +284,13 @@ class TestJupyterRunner:
 
 class TestJupyterRunnerContextManager:
     """Test context manager functionality."""
-    
-    @patch.object(JupyterRunner, '_validate_connection')
-    @patch.object(JupyterRunner, 'start_kernel')
-    @patch.object(JupyterRunner, 'stop_kernel')
+
+    @patch.object(JupyterRunner, "_validate_connection")
+    @patch.object(JupyterRunner, "start_kernel")
+    @patch.object(JupyterRunner, "stop_kernel")
     def test_context_manager(self, mock_stop, mock_start, mock_validate):
         """Test context manager starts and stops kernel."""
-        with JupyterRunner("http://localhost:8888") as runner:
+        with JupyterRunner("http://localhost:8888"):
             mock_start.assert_called_once()
-        
+
         mock_stop.assert_called_once()

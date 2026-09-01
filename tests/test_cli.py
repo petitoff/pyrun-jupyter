@@ -1,8 +1,8 @@
 """Tests for the pyrun-jupyter CLI."""
 
+import tempfile
 from argparse import Namespace
 from pathlib import Path
-import tempfile
 from unittest.mock import patch
 
 from pyrun_jupyter.cli import create_parser, handle_run_project
@@ -37,6 +37,21 @@ class TestCLIParser:
         assert args.artifact == ["outputs/*.bin"]
         assert args.exclude == [".git"]
         assert args.artifact_dir == "results"
+
+    @patch.dict(
+        "os.environ",
+        {
+            "PYRUN_JUPYTER_URL": "http://jupyter.example:8888",
+            "PYRUN_JUPYTER_TOKEN": "secret-from-env",
+        },
+    )
+    def test_connection_defaults_can_come_from_environment(self):
+        """Credentials can be supplied without exposing a token in process arguments."""
+        parser = create_parser()
+        args = parser.parse_args(["run", "print('hello')"])
+
+        assert args.url == "http://jupyter.example:8888"
+        assert args.token == "secret-from-env"
 
 
 class TestHandleRunProject:

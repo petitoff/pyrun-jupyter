@@ -11,39 +11,49 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-from .runner import JupyterRunner
 from .exceptions import PyrunJupyterError
+from .runner import JupyterRunner
+
+
+def package_version() -> str:
+    """Return the installed package version without duplicating release metadata."""
+    try:
+        return version("pyrun-jupyter")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def parse_params(params_str: Optional[str]) -> Dict[str, Any]:
     """Parse parameters string into a dictionary.
-    
+
     Args:
         params_str: JSON string or key=value pairs separated by commas.
                    Examples: '{"lr": 0.01, "epochs": 100}' or "lr=0.01,epochs=100"
-    
+
     Returns:
         Dictionary of parameters
-    
+
     Raises:
         ValueError: If the params string cannot be parsed
     """
     if not params_str:
         return {}
-    
+
     params_str = params_str.strip()
-    
+
     # Try JSON first
     if params_str.startswith("{") and params_str.endswith("}"):
         try:
             return json.loads(params_str)
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON format: {e}")
-    
+
     # Parse key=value pairs
     params: Dict[str, Any] = {}
     for pair in params_str.split(","):
@@ -55,55 +65,56 @@ def parse_params(params_str: Optional[str]) -> Dict[str, Any]:
         key, value = pair.split("=", 1)
         key = key.strip()
         value = value.strip()
-        
+
         # Try to convert value to appropriate type
         params[key] = convert_value(value)
-    
+
     return params
 
 
 def convert_value(value: str) -> Any:
     """Convert a string value to its appropriate Python type.
-    
+
     Args:
         value: String value to convert
-        
+
     Returns:
         Converted value (int, float, bool, str, or None)
     """
     # Try None
     if value.lower() == "none" or value.lower() == "null":
         return None
-    
+
     # Try bool
     if value.lower() == "true":
         return True
     if value.lower() == "false":
         return False
-    
+
     # Try int
     try:
         return int(value)
     except ValueError:
         pass
-    
+
     # Try float
     try:
         return float(value)
     except ValueError:
         pass
-    
+
     # Return as string (strip quotes if present)
-    if (value.startswith('"') and value.endswith('"')) or \
-       (value.startswith("'") and value.endswith("'")):
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
         return value[1:-1]
-    
+
     return value
 
 
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser.
-    
+
     Returns:
         Configured ArgumentParser instance
     """
@@ -119,124 +130,106 @@ Examples:
       --params '{"lr": 0.01, "epochs": 100}'
   pyrun-jupyter run-file train.py --url http://localhost:8888 --token xxx \\
       --params "lr=0.01,epochs=100"
-        """
+        """,
     )
-    
+
     # Global arguments
-    parser.add_argument(
-        "--version",
-        action="version",
-        version="%(prog)s 0.5.1"
-    )
-    
+    parser.add_argument("--version", action="version", version=f"%(prog)s {package_version()}")
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     def add_connection_args(command_parser: argparse.ArgumentParser) -> None:
         command_parser.add_argument(
             "--url",
             type=str,
-            required=True,
-            help="Jupyter server URL (e.g., http://localhost:8888)"
+            default=os.environ.get("PYRUN_JUPYTER_URL"),
+            required="PYRUN_JUPYTER_URL" not in os.environ,
+            help="Jupyter server URL (or set PYRUN_JUPYTER_URL)",
         )
         command_parser.add_argument(
             "--token",
             type=str,
-            default=None,
-            help="Authentication token for the Jupyter server"
+            default=os.environ.get("PYRUN_JUPYTER_TOKEN"),
+            help="Authentication token (prefer PYRUN_JUPYTER_TOKEN to avoid shell history)",
         )
         command_parser.add_argument(
-            "--kernel",
-            type=str,
-            default="python3",
-            help="Kernel name to use (default: python3)"
+            "--kernel", type=str, default="python3", help="Kernel name to use (default: python3)"
         )
         command_parser.add_argument(
             "--timeout",
             type=float,
             default=60.0,
-            help="Maximum execution time in seconds (default: 60)"
+            help="Maximum execution time in seconds (default: 60)",
         )
-    
+
     # run-file command
     run_file_parser = subparsers.add_parser(
         "run-file",
         help="Execute a Python file on a remote Jupyter server",
-        description="Execute a Python file on a remote Jupyter server."
+        description="Execute a Python file on a remote Jupyter server.",
     )
-    run_file_parser.add_argument(
-        "filepath",
-        type=str,
-        help="Path to the Python file to execute"
-    )
+    run_file_parser.add_argument("filepath", type=str, help="Path to the Python file to execute")
     add_connection_args(run_file_parser)
     run_file_parser.add_argument(
         "--params",
         type=str,
         default=None,
-        help="Parameters to inject as variables. Can be JSON (e.g., '{\"key\": \"value\"}') "
-             "or key=value pairs separated by commas (e.g., 'key=value,key2=123')"
+        help='Parameters to inject as variables. Can be JSON (e.g., \'{"key": "value"}\') '
+        "or key=value pairs separated by commas (e.g., 'key=value,key2=123')",
     )
-    
+
     # run command
     run_parser = subparsers.add_parser(
         "run",
         help="Execute Python code on a remote Jupyter server",
-        description="Execute Python code on a remote Jupyter server."
+        description="Execute Python code on a remote Jupyter server.",
     )
-    run_parser.add_argument(
-        "code",
-        type=str,
-        help="Python code to execute"
-    )
+    run_parser.add_argument("code", type=str, help="Python code to execute")
     add_connection_args(run_parser)
 
     run_project_parser = subparsers.add_parser(
         "run-project",
         help="Sync a Python project and execute an entrypoint on a remote Jupyter server",
-        description="Upload a local project directory, run an entrypoint remotely, and optionally download artifacts."
+        description="Upload a local project directory, run an entrypoint remotely, and optionally download artifacts.",
     )
     run_project_parser.add_argument(
-        "project_dir",
-        type=str,
-        help="Path to the local project directory to sync"
+        "project_dir", type=str, help="Path to the local project directory to sync"
     )
     run_project_parser.add_argument(
-        "entrypoint",
-        type=str,
-        help="Entrypoint file inside the project directory"
+        "entrypoint", type=str, help="Entrypoint file inside the project directory"
     )
     add_connection_args(run_project_parser)
     run_project_parser.add_argument(
         "--params",
         type=str,
         default=None,
-        help="Parameters to inject into the entrypoint. Accepts JSON or key=value pairs."
+        help="Parameters to inject into the entrypoint. Accepts JSON or key=value pairs.",
     )
     run_project_parser.add_argument(
         "--artifact",
         action="append",
         default=[],
-        help="Artifact path or glob relative to the remote project directory. Repeat for multiple patterns."
+        help="Artifact path or glob relative to the remote project directory. Repeat for multiple patterns.",
     )
     run_project_parser.add_argument(
         "--artifact-dir",
         type=str,
         default="artifacts",
-        help="Local directory where downloaded artifacts will be stored (default: ./artifacts)"
+        help="Local directory where downloaded artifacts will be stored (default: ./artifacts)",
     )
     run_project_parser.add_argument(
         "--exclude",
         action="append",
         default=[],
-        help="Glob or path pattern to exclude from project sync. Repeat for multiple patterns."
+        help="Glob or path pattern to exclude from project sync. Repeat for multiple patterns.",
     )
     run_project_parser.add_argument(
         "--remote-dir",
         type=str,
         default=None,
-        help="Remote workspace directory to use for the synced project"
+        help="Remote workspace directory to use for the synced project",
     )
-    
+
     return parser
 
 
@@ -265,42 +258,36 @@ def print_result(result) -> int:
 
 def handle_run_file(args: argparse.Namespace) -> int:
     """Handle the run-file command.
-    
+
     Args:
         args: Parsed command-line arguments
-        
+
     Returns:
         Exit code (0 for success, 1 for failure)
     """
     filepath = Path(args.filepath)
-    
+
     if not filepath.exists():
         print(f"Error: File not found: {filepath}", file=sys.stderr)
         return 1
-    
+
     if not filepath.suffix == ".py":
         print(f"Error: Expected .py file, got: {filepath.suffix}", file=sys.stderr)
         return 1
-    
+
     try:
         params = parse_params(args.params)
     except ValueError as e:
         print(f"Error: Invalid params format: {e}", file=sys.stderr)
         return 1
-    
+
     try:
-        with JupyterRunner(
-            url=args.url,
-            token=args.token,
-            kernel_name=args.kernel
-        ) as runner:
+        with JupyterRunner(url=args.url, token=args.token, kernel_name=args.kernel) as runner:
             result = runner.run_file(
-                filepath=filepath,
-                params=params if params else None,
-                timeout=args.timeout
+                filepath=filepath, params=params if params else None, timeout=args.timeout
             )
             return print_result(result)
-            
+
     except PyrunJupyterError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -311,23 +298,16 @@ def handle_run_file(args: argparse.Namespace) -> int:
 
 def handle_run(args: argparse.Namespace) -> int:
     """Handle the run command.
-    
+
     Args:
         args: Parsed command-line arguments
-        
+
     Returns:
         Exit code (0 for success, 1 for failure)
     """
     try:
-        with JupyterRunner(
-            url=args.url,
-            token=args.token,
-            kernel_name=args.kernel
-        ) as runner:
-            result = runner.run(
-                code=args.code,
-                timeout=args.timeout
-            )
+        with JupyterRunner(url=args.url, token=args.token, kernel_name=args.kernel) as runner:
+            result = runner.run(code=args.code, timeout=args.timeout)
             return print_result(result)
 
     except PyrunJupyterError as e:
@@ -355,11 +335,7 @@ def handle_run_project(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        with JupyterRunner(
-            url=args.url,
-            token=args.token,
-            kernel_name=args.kernel
-        ) as runner:
+        with JupyterRunner(url=args.url, token=args.token, kernel_name=args.kernel) as runner:
             result = runner.run_project(
                 project_dir=project_dir,
                 entrypoint=args.entrypoint,
@@ -368,7 +344,7 @@ def handle_run_project(args: argparse.Namespace) -> int:
                 remote_dir=args.remote_dir,
                 exclude_patterns=args.exclude or None,
                 params=params if params else None,
-                timeout=args.timeout
+                timeout=args.timeout,
             )
             return print_result(result)
 
@@ -382,20 +358,20 @@ def handle_run_project(args: argparse.Namespace) -> int:
 
 def main(args: Optional[list] = None) -> int:
     """Main entry point for the CLI.
-    
+
     Args:
         args: Command-line arguments (defaults to sys.argv[1:])
-        
+
     Returns:
         Exit code (0 for success, 1 for failure)
     """
     parser = create_parser()
     parsed_args = parser.parse_args(args)
-    
+
     if parsed_args.command is None:
         parser.print_help()
         return 1
-    
+
     if parsed_args.command == "run-file":
         return handle_run_file(parsed_args)
     elif parsed_args.command == "run":
