@@ -52,8 +52,17 @@ class ContentsManager:
         self.token = token
         self.headers = headers or {}
 
+        # Some proxies (e.g. Kaggle) accept the token only as a query parameter,
+        # so it is sent both ways; Jupyter Server accepts either.
+        self.params = {"token": token} if token else {}
+
         if token:
             self.headers["Authorization"] = f"token {token}"
+
+    def _redact(self, error: Exception) -> str:
+        """Return the error text with the token removed (it is part of the URL)."""
+        text = str(error)
+        return text.replace(self.token, "***") if self.token else text
 
     def _request(self, method: str, endpoint: str, **kwargs) -> requests.Response:
         """Make HTTP request to Jupyter API."""
@@ -64,17 +73,20 @@ class ContentsManager:
                 method,
                 url,
                 headers=self.headers,
+                params=self.params,
                 timeout=60,  # Longer timeout for file transfers
                 **kwargs,
             )
             response.raise_for_status()
             return response
         except requests.exceptions.ConnectionError as e:
-            raise ConnectionError(f"Failed to connect to Jupyter server: {e}")
+            raise ConnectionError(
+                f"Failed to connect to Jupyter server: {self._redact(e)}"
+            ) from None
         except requests.exceptions.HTTPError as e:
             if response.status_code == 404:
                 raise FileTransferError("Path not found on server")
-            raise FileTransferError(f"HTTP error: {e}")
+            raise FileTransferError(f"HTTP error: {self._redact(e)}") from None
         except requests.exceptions.Timeout:
             raise ConnectionError("Connection timed out during file transfer")
 

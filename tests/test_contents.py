@@ -21,6 +21,7 @@ class TestContentsManager:
         assert manager.token == "test_token"
         assert "Authorization" in manager.headers
         assert manager.headers["Authorization"] == "token test_token"
+        assert manager.params == {"token": "test_token"}
 
     def test_initialization_no_token(self):
         """Test initialization without token."""
@@ -28,6 +29,15 @@ class TestContentsManager:
 
         assert manager.token is None
         assert "Authorization" not in manager.headers
+        assert manager.params == {}
+
+    @patch("pyrun_jupyter.contents.requests.request")
+    def test_token_sent_as_query_parameter(self, mock_request):
+        """Proxies such as Kaggle's ignore the header and need ?token=."""
+        manager = ContentsManager("http://localhost:8888", token="xxx")
+        manager.delete_file("a.txt")
+
+        assert mock_request.call_args.kwargs["params"] == {"token": "xxx"}
 
     def test_url_trailing_slash_removed(self):
         """Test that trailing slash is removed from URL."""

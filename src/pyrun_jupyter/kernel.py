@@ -34,8 +34,17 @@ class KernelManager:
         self.token = token
         self.headers = headers or {}
 
+        # Some proxies (e.g. Kaggle) accept the token only as a query parameter,
+        # so it is sent both ways; Jupyter Server accepts either.
+        self.params = {"token": token} if token else {}
+
         if token:
             self.headers["Authorization"] = f"token {token}"
+
+    def _redact(self, error: Exception) -> str:
+        """Return the error text with the token removed (it is part of the URL)."""
+        text = str(error)
+        return text.replace(self.token, "***") if self.token else text
 
     def _request(self, method: str, endpoint: str, **kwargs) -> requests.Response:
         """Make HTTP request to Jupyter API.
@@ -54,17 +63,21 @@ class KernelManager:
         url = f"{self.base_url}{endpoint}"
 
         try:
-            response = requests.request(method, url, headers=self.headers, timeout=30, **kwargs)
+            response = requests.request(
+                method, url, headers=self.headers, params=self.params, timeout=30, **kwargs
+            )
             response.raise_for_status()
             return response
         except requests.exceptions.ConnectionError as e:
-            raise ConnectionError(f"Failed to connect to Jupyter server at {self.base_url}: {e}")
+            raise ConnectionError(
+                f"Failed to connect to Jupyter server at {self.base_url}: {self._redact(e)}"
+            ) from None
         except requests.exceptions.HTTPError as e:
             if response.status_code == 401:
                 raise ConnectionError("Authentication failed. Check your token.")
             elif response.status_code == 403:
                 raise ConnectionError("Access forbidden. Check your permissions.")
-            raise ConnectionError(f"HTTP error: {e}")
+            raise ConnectionError(f"HTTP error: {self._redact(e)}") from None
         except requests.exceptions.Timeout:
             raise ConnectionError("Connection timed out")
 
